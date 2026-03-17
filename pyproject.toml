@@ -4,4 +4,14 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "python-dotenv",
+    "openai>=1.0.0",
+    "bfcl-eval==2025.10.27.1",
+    "soundfile>=0.13.1",
+]
+
+[project.scripts]
+bella-run-bfcl-infer = "scripts.run_bfcl_infer:main"
+bella-run-bfcl-eval = "scripts.run_bfcl_eval:main"
+bella-run-bfcl-demo = "scripts.run_demo:main"
