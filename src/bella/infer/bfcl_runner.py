@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, List, Dict, Any
-import json
+from typing import Any, Iterable, List
 
 from bella.config import load_settings
 from bella.infer.openai_client import OpenAIClient
-from bella.infer.bfcl_formatter import build_simple_python_request
-from bella.infer.bfcl_parser import parse_simple_python_tool_calls
+from bella.infer.types import BellaResult
+from bella.infer.adapters.base import get_adapter
+from bella.infer.writer import write_results_jsonl
 
 
 def iter_limited(entries: list[dict], limit: int | None) -> Iterable[dict]:
@@ -17,53 +17,19 @@ def iter_limited(entries: list[dict], limit: int | None) -> Iterable[dict]:
         yield from entries[:limit]
 
 
-def _write_simple_python_results_jsonl(
-    entries: List[Dict[str, Any]],
-    registry_name: str,
-    result_root: Path,
-) -> Path:
-    """
-    Write BFCL-compatible JSONL result file for simple_python.
-
-    File layout follows BFCL's conventions:
-      result/<registry_dir_name>/non_live/BFCL_v4_simple_python_result.json
-    """
-    registry_dir = registry_name.replace("/", "_")
-    out_dir = result_root / registry_dir / "non_live"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    file_path = out_dir / "BFCL_v4_simple_python_result.json"
-
-    # 保持按 id 排序，方便 evaluator / diff。
-    entries_sorted = sorted(entries, key=lambda e: e.get("id", ""))
-
-    with file_path.open("w", encoding="utf-8") as f:
-        for e in entries_sorted:
-            f.write(json.dumps(e, ensure_ascii=False) + "\n")
-
-    return file_path
-
-
 def run_bfcl_infer(category: str = "simple_python", limit: int = 3) -> None:
     """
-    Run minimal BFCL inference loop for a single category (MVP: simple_python).
-
-    Bella fully owns:
-    - request construction (messages + tools)
-    - API calling (OpenAI-compatible client)
-    - tool call parsing
-    - result entry construction and JSONL writing
+    Run BFCL inference loop for a single category using Bella's unified
+    adapter + client + writer pipeline.
     """
-    if category != "simple_python":
-        raise ValueError(
-            "Current Bella MVP only supports category='simple_python' for inference."
-        )
-
     settings = load_settings()
 
     # 延迟导入 BFCL 数据加载和结果路径工具，确保 BFCL_PROJECT_ROOT 已由 load_settings 写入环境变量。
     from bfcl_eval.constants.eval_config import RESULT_PATH
     from bfcl_eval.utils import find_file_by_category, load_dataset_entry
+
+    adapter = get_adapter(category)
+    client = OpenAIClient()
 
     # Load BFCL official dataset entries for the given category.
     entries = load_dataset_entry(
@@ -75,46 +41,38 @@ def run_bfcl_infer(category: str = "simple_python", limit: int = 3) -> None:
     if not entries:
         raise RuntimeError(f"No BFCL entries found for category '{category}'.")
 
-    client = OpenAIClient()
-
-    result_entries: List[Dict[str, Any]] = []
+    results: List[BellaResult] = []
     for entry in iter_limited(entries, limit):
-        assert isinstance(entry.get("function"), list)
+        # Per-entry state to support both single-turn and multi-turn adapters.
+        state_for_entry: dict[str, Any] = adapter.init_state(entry)
+        last_bella_result: BellaResult | None = None
 
-        # 1) BFCL entry -> OpenAI messages + tools
-        messages, tools = build_simple_python_request(entry)
+        while True:
+            request = adapter.build_request(entry, state_for_entry)
+            resp = client.chat_with_tools(
+                messages=request.messages,
+                tools=request.tools,
+                temperature=request.temperature,
+                tool_choice=request.tool_choice,
+            )
+            last_bella_result = adapter.parse_response(entry, resp, state_for_entry)
 
-        # 2) Call model
-        resp = client.chat_with_tools(messages=messages, tools=tools, temperature=0.0)
+            if not adapter.has_next_turn(entry, state_for_entry):
+                break
 
-        # 3) Parse tool calls into BFCL result format
-        parsed_result = parse_simple_python_tool_calls(resp)
+        assert last_bella_result is not None
+        final_result = adapter.finalize_result(entry, state_for_entry, last_bella_result)
+        results.append(final_result)
 
-        # 4) Construct BFCL-compatible result entry
-        result_entry: Dict[str, Any] = {
-            "id": entry["id"],
-            "result": parsed_result,
-        }
-
-        # 可选：保留一些基础 metadata，便于 BFCL 统计 token / cost（非必须）
-        usage = getattr(resp, "usage", None)
-        if usage:
-            result_entry["input_token_count"] = getattr(usage, "prompt_tokens", 0)
-            result_entry["output_token_count"] = getattr(usage, "completion_tokens", 0)
-
-        # latency 在 client 内部没显式测量，这里暂不填或置 0。
-        result_entry["latency"] = 0.0
-
-        result_entries.append(result_entry)
-
-    if not result_entries:
+    if not results:
         raise RuntimeError("No inference results produced.")
 
-    # 5) Write JSONL in BFCL-compatible layout (Bella owns writer logic).
-    result_file = _write_simple_python_results_jsonl(
-        entries=result_entries,
+    result_file = write_results_jsonl(
+        results=results,
         registry_name=settings.bfcl_registry_name,
         result_root=Path(RESULT_PATH),
+        group=adapter.result_group(category),
+        filename=adapter.result_filename(category),
     )
 
     # Try to locate the result file for this category via BFCL helper for sanity.

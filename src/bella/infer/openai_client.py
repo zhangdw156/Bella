@@ -37,6 +37,7 @@ class OpenAIClient:
         messages: List[Mapping[str, Any]],
         tools: Iterable[Mapping[str, Any]] | None = None,
         temperature: float = 0.0,
+        tool_choice: str | None = "auto",
     ):
         """
         Call an OpenAI-compatible /chat/completions endpoint with optional tools.
@@ -51,7 +52,8 @@ class OpenAIClient:
         }
         if tools_list:
             kwargs["tools"] = tools_list
-            kwargs["tool_choice"] = "auto"
+            if tool_choice:
+                kwargs["tool_choice"] = tool_choice
 
         return self._client.chat.completions.create(**kwargs)
 
