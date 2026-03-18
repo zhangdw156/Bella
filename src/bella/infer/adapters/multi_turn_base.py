@@ -63,6 +63,13 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         #   - "none": baseline, no history injected
         #   - "action_history": inject previous turns' function calls into prompt
         self.memory_mode: str = os.getenv("BELLA_MULTI_TURN_MEMORY_MODE", "none")
+        # Lightweight per-turn debug trace switch (stdout only).
+        self.debug_mode: bool = os.getenv("BELLA_MULTI_TURN_DEBUG", "0") not in (
+            "0",
+            "",
+            "false",
+            "False",
+        )
 
     def init_state(self, entry: Dict[str, Any]) -> Dict[str, Any]:
         question = entry.get("question", [])
@@ -78,6 +85,7 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             "messages": [],
             "model_responses": [[] for _ in range(num_turns)],
             "history_calls": [[] for _ in range(num_turns)],
+            "tools_per_turn": [[] for _ in range(num_turns)],
         }
 
         # execution state: per-turn list of raw FC-style function calls,
@@ -164,6 +172,19 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         # injected function docs into entry["function"].
         functions = entry.get("function", [])
         tools = build_tools_from_functions(functions)
+
+        # Cache available tools (by name) for this turn for debug trace.
+        tool_names: List[str] = []
+        for t in tools:
+            fn = t.get("function", {})
+            name = fn.get("name")
+            if isinstance(name, str):
+                tool_names.append(name)
+        tools_per_turn: List[List[str]] = conversation.get("tools_per_turn", [])
+        if not tools_per_turn or len(tools_per_turn) != len(execution["function_calls"]):
+            tools_per_turn = [[] for _ in range(len(execution["function_calls"]))]
+            conversation["tools_per_turn"] = tools_per_turn
+        tools_per_turn[current_turn_index] = tool_names
 
         return BellaRequest(
             messages=messages,
@@ -282,6 +303,41 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         # Refresh human-readable history from the single raw source of truth.
         conversation = state["conversation"]
         conversation["history_calls"] = self._format_execution_history(execution)
+
+        # Optional per-turn debug trace.
+        if self.debug_mode:
+            turn_index: int = conversation["current_turn_index"]
+            turn_texts: List[str] = conversation.get("turn_texts", [])
+            user_text = turn_texts[turn_index] if turn_index < len(turn_texts) else ""
+            history_calls: List[List[str]] = conversation.get("history_calls", [])
+            tools_per_turn: List[List[str]] = conversation.get("tools_per_turn", [])
+
+            available_tools = tools_per_turn[turn_index] if turn_index < len(tools_per_turn) else []
+            selected_calls = history_calls[turn_index] if turn_index < len(history_calls) else []
+
+            print(f"[Bella][multi_turn_base][debug] turn={turn_index}")
+            print(f"[Bella][multi_turn_base][debug] user_request={user_text!r}")
+            print(f"[Bella][multi_turn_base][debug] tools={available_tools}")
+
+            if self.memory_mode == "action_history" and turn_index > 0:
+                prev_history_lines: List[str] = []
+                for idx in range(turn_index):
+                    if idx < len(history_calls) and history_calls[idx]:
+                        prev_history_lines.append(
+                            f"Turn {idx}: {', '.join(history_calls[idx])}"
+                        )
+                print(
+                    "[Bella][multi_turn_base][debug] injected_action_history="
+                    + (prev_history_lines or ["<none>"]).__repr__()
+                )
+            else:
+                print(
+                    "[Bella][multi_turn_base][debug] injected_action_history=<none>"
+                )
+
+            print(
+                f"[Bella][multi_turn_base][debug] selected_calls={selected_calls}"
+            )
 
         return BellaResult(
             id=entry["id"],
