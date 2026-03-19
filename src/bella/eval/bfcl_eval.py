@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+
 from bella.config import load_settings
 from bella.utils.bfcl_compat import ensure_bfcl_model_alias
 
@@ -46,4 +48,28 @@ def run_bfcl_eval(category: str = "simple_python", partial_eval: bool = True) ->
             f"[Bella] BFCL evaluation finished for category='{category}', "
             f"but score file could not be located under SCORE_PATH={SCORE_PATH}."
         )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run BFCL evaluation via Bella using BFCL official evaluator."
+    )
+    parser.add_argument(
+        "--category",
+        type=str,
+        default="simple_python",
+        help="BFCL test category to evaluate (default: simple_python).",
+    )
+    parser.add_argument(
+        "--no-partial-eval",
+        action="store_true",
+        help=(
+            "Disable partial_eval flag in BFCL evaluator. "
+            "Not recommended for MVP where only a subset is generated."
+        ),
+    )
+    args = parser.parse_args()
+
+    partial_eval = not args.no_partial_eval
+    run_bfcl_eval(category=args.category, partial_eval=partial_eval)
 

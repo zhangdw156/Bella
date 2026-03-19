@@ -1,0 +1,14 @@
+# BFCL v4 category metadata for result layout and evaluator routing.
+# Used by adapters for result_group and result_filename only; data/tools unchanged.
+
+simple_python:
+  result_group: non_live
+  result_filename: BFCL_v4_simple_python_result.json
+
+multiple:
+  result_group: non_live
+  result_filename: BFCL_v4_multiple_result.json
+
+multi_turn_base:
+  result_group: multi_turn
+  result_filename: BFCL_v4_multi_turn_base_result.json

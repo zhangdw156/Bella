@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 import os
+import json
 
+from bella.bfcl_resources import load_bfcl_categories, load_prompt_system, render_user_prompt
+from bella.env.bfcl_multi_turn import BFCLMultiTurnEnvironmentSession
+from bella.env.tool_executor import execute_first_tool_call
 from bella.infer.types import BellaRequest, BellaResult
 from bella.infer.adapters.base import BFCLAdapter, register_adapter
 from bella.infer.adapters.common import build_tools_from_functions, extract_usage
+
+_CATEGORIES = load_bfcl_categories()
 
 
 def _extract_turn_user_texts(question: Any) -> List[str]:
@@ -70,6 +76,18 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             "false",
             "False",
         )
+        # A stable identifier used by BFCL env executor to cache instances.
+        # Keep it independent from the OpenAI model name to avoid accidental mixing.
+        self.env_model_name: str = os.getenv("BELLA_MULTI_TURN_ENV_MODEL_NAME", "bella")
+        self.tool_result_max_chars_per_item: int = int(
+            os.getenv("BELLA_TOOL_RESULT_MEMORY_MAX_CHARS_PER_ITEM", "600")
+        )
+        self.tool_result_max_items: int = int(
+            os.getenv("BELLA_TOOL_RESULT_MEMORY_MAX_ITEMS", "3")
+        )
+        self.tool_result_max_total_chars: int = int(
+            os.getenv("BELLA_TOOL_RESULT_MEMORY_MAX_TOTAL_CHARS", "1800")
+        )
 
     def init_state(self, entry: Dict[str, Any]) -> Dict[str, Any]:
         question = entry.get("question", [])
@@ -82,10 +100,14 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         conversation: Dict[str, Any] = {
             "current_turn_index": 0,
             "turn_texts": turn_texts,
-            "messages": [],
+            # Full multi-turn message history (system/user/tool/assistant).
+            "history_messages": [],
             "model_responses": [[] for _ in range(num_turns)],
             "history_calls": [[] for _ in range(num_turns)],
             "tools_per_turn": [[] for _ in range(num_turns)],
+            "tool_outputs": ["" for _ in range(num_turns)],
+            # memory entries: {"turn": int, "tool_call": str, "tool_result": str}
+            "tool_result_memory_items": [],
         }
 
         # execution state: per-turn list of raw FC-style function calls,
@@ -95,12 +117,22 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             "function_calls": [[] for _ in range(num_turns)],
         }
 
+        # Reuse BFCL backend implementations and semantics for environment execution.
+        env_session = BFCLMultiTurnEnvironmentSession(
+            initial_config=entry.get("initial_config", {}) or {},
+            involved_classes=entry.get("involved_classes", []) or [],
+            model_name=self.env_model_name,
+            test_entry_id=str(entry.get("id", "")),
+            long_context=("long_context" in str(entry.get("id", "")) or "composite" in str(entry.get("id", ""))),
+        )
+
         return {
             "conversation": conversation,
             "execution": execution,
+            "env": env_session,
         }
 
-    def _build_messages_for_turn(self, entry: Dict[str, Any], state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _append_user_message_for_turn(self, entry: Dict[str, Any], state: Dict[str, Any]) -> None:
         conversation = state["conversation"]
         test_id = entry.get("id", "")
         turn_index: int = conversation["current_turn_index"]
@@ -112,21 +144,9 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         else:
             user_text = ""
 
-        system_content = (
-            "You are a function calling model operating in multiple turns. "
-            "At each turn, you must decide which file-system function to call "
-            "and provide arguments as a JSON object that satisfies the given "
-            "JSON schema. Only output a single function call via tools."
-        )
-
-        # Baseline user content
-        user_content = (
-            f"BFCL test id: {test_id}\n"
-            f"Current turn index: {turn_index}\n"
-            f"User request for this turn:\n{user_text}\n"
-        )
-
-        # Optionally inject action history (previous turns only)
+        # Optional action history block (previous turns only)
+        action_history_section = ""
+        tool_result_memory_section = ""
         if self.memory_mode == "action_history" and turn_index > 0:
             history_calls: List[List[str]] = conversation.get("history_calls", [])
             history_lines: List[str] = []
@@ -136,23 +156,39 @@ class MultiTurnBaseAdapter(BFCLAdapter):
                 joined = "; ".join(history_calls[idx])
                 history_lines.append(f"- Turn {idx}: {joined}")
             if history_lines:
-                user_content += "\nAction history so far:\n" + "\n".join(history_lines) + "\n"
+                action_history_section = "\nAction history so far:\n" + "\n".join(history_lines) + "\n"
+        elif self.memory_mode == "tool_result_memory" and turn_index > 0:
+            memory_block = self._build_tool_result_memory_block(state, turn_index)
+            if memory_block:
+                tool_result_memory_section = (
+                    "\nTool result memory so far (focus on results):\n"
+                    + memory_block
+                    + "\n"
+                )
+        elif self.memory_mode == "tool_result_memory_v2" and turn_index > 0:
+            memory_block = self._build_tool_result_memory_block(state, turn_index)
+            if memory_block:
+                tool_result_memory_section = (
+                    "\nTool result observations so far:\n"
+                    + memory_block
+                    + "\n"
+                )
 
-        user_content += (
-            "\nUse exactly one tool function call at this turn and "
-            "only provide JSON arguments."
+        user_content = render_user_prompt(
+            "multi_turn_base",
+            test_id=test_id,
+            turn_index=turn_index,
+            user_text=user_text,
+            action_history_section=action_history_section,
+            tool_result_memory_section=tool_result_memory_section,
         )
 
-        messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_content},
-            {
-                "role": "user",
-                "content": user_content,
-            },
-        ]
+        history_messages: List[Dict[str, Any]] = conversation["history_messages"]
+        if not history_messages:
+            system_content = load_prompt_system("multi_turn_base")
+            history_messages.append({"role": "system", "content": system_content})
 
-        conversation["messages"] = messages
-        return messages
+        history_messages.append({"role": "user", "content": user_content})
 
     def build_request(self, entry: Dict[str, Any], state: Dict[str, Any]) -> BellaRequest:
         conversation = state["conversation"]
@@ -166,7 +202,9 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             current_turn_index = num_turns - 1
             conversation["current_turn_index"] = current_turn_index
 
-        messages = self._build_messages_for_turn(entry, state)
+        # Append current turn user message to the running history (system once).
+        self._append_user_message_for_turn(entry, state)
+        messages: List[Dict[str, Any]] = conversation["history_messages"]
 
         # BFCL utils.populate_test_cases_with_predefined_functions has already
         # injected function docs into entry["function"].
@@ -192,6 +230,139 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             tool_choice="auto",
             temperature=0.0,
         )
+
+    def _is_error_output(self, text: str) -> bool:
+        text_l = text.lower()
+        return any(
+            k in text_l
+            for k in [
+                "error",
+                "failed",
+                "no such file",
+                "not found",
+                "invalid path",
+                "exception",
+            ]
+        )
+
+    def _truncate_tool_output(self, text: str) -> str:
+        """
+        Keep error outputs as complete as possible; otherwise apply hard truncation.
+        """
+        if not text:
+            return text
+        if self._is_error_output(text):
+            # Error feedback is high value; keep full text unless extremely long.
+            hard_limit = max(self.tool_result_max_chars_per_item * 2, 1200)
+            if len(text) > hard_limit:
+                return text[:hard_limit] + "...<truncated>"
+            return text
+
+        if len(text) <= self.tool_result_max_chars_per_item:
+            return text
+        return text[: self.tool_result_max_chars_per_item] + "...<truncated>"
+
+    def _build_tool_result_memory_block(self, state: Dict[str, Any], current_turn_index: int) -> str:
+        conversation = state["conversation"]
+        items: List[Dict[str, Any]] = conversation.get("tool_result_memory_items", [])
+        if not items:
+            return ""
+
+        eligible = [it for it in items if int(it.get("turn", -1)) < current_turn_index]
+        if not eligible:
+            return ""
+
+        if self.tool_result_max_items > 0:
+            eligible = eligible[-self.tool_result_max_items :]
+
+        sep = " => " if self.memory_mode == "tool_result_memory_v2" else " -> "
+        lines: List[str] = []
+        for it in eligible:
+            t = it.get("turn", "?")
+            call = str(it.get("tool_call", ""))
+            result = str(it.get("tool_result", ""))
+            lines.append(f"- Turn {t} | {call}{sep}{result}")
+
+        if self.tool_result_max_total_chars > 0:
+            while lines and len("\n".join(lines)) > self.tool_result_max_total_chars:
+                lines.pop(0)
+
+        return "\n".join(lines)
+
+    def _safe_json_obj(self, text: str) -> Dict[str, Any] | None:
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict):
+                return obj
+            return None
+        except Exception:
+            return None
+
+    def _observation_from_tool_result(self, tool_call: str, tool_result: str) -> str:
+        """
+        Convert raw tool result to a factual observation string.
+        No planner hints, no extra reasoning.
+        """
+        call = tool_call or "unknown_tool()"
+        tool_name = call.split("(", 1)[0].strip() if "(" in call else call.strip()
+        result = tool_result or ""
+        obj = self._safe_json_obj(result)
+
+        # Generic error-first handling.
+        if self._is_error_output(result):
+            if obj and isinstance(obj.get("error"), str):
+                return f"{tool_name} failed: {obj['error']}"
+            return f"{tool_name} failed: {result}"
+
+        if tool_name == "pwd":
+            if obj and isinstance(obj.get("current_working_directory"), str):
+                return f"The current working directory is {obj['current_working_directory']}."
+            return f"pwd returned: {result}"
+
+        if tool_name == "ls":
+            if obj and isinstance(obj.get("current_directory_content"), list):
+                items = [str(x) for x in obj["current_directory_content"]]
+                if not items:
+                    return "The current directory is empty."
+                return "The current directory contains: " + ", ".join(items) + "."
+            return f"ls returned: {result}"
+
+        if tool_name == "cd":
+            if obj and isinstance(obj.get("current_working_directory"), str):
+                return f"Changed directory to {obj['current_working_directory']}."
+            return f"cd returned: {result}"
+
+        if tool_name == "mkdir":
+            if result.strip() == "None":
+                return "The directory creation command completed."
+            if obj and isinstance(obj.get("result"), str):
+                return f"mkdir result: {obj['result']}"
+            return f"mkdir returned: {result}"
+
+        if tool_name == "mv":
+            if obj and isinstance(obj.get("result"), str):
+                return f"Move result: {obj['result']}"
+            return f"mv returned: {result}"
+
+        if tool_name == "grep":
+            if obj and "matches" in obj:
+                return "The grep command found matches."
+            return f"grep returned: {result}"
+
+        if tool_name == "sort":
+            if result.strip() == "None":
+                return "The sort command completed."
+            return f"sort returned: {result}"
+
+        if tool_name == "diff":
+            if obj and isinstance(obj.get("diff_lines"), str):
+                if obj["diff_lines"].strip():
+                    return "The diff command found differences between the files."
+                return "The diff command found no differences between the files."
+            return f"diff returned: {result}"
+
+        # Predictable fallback.
+        return f"The tool {tool_name} returned: {result}"
 
     def _append_function_call_for_turn(
         self,
@@ -304,6 +475,67 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         conversation = state["conversation"]
         conversation["history_calls"] = self._format_execution_history(execution)
 
+        # Execute at most one tool call and append tool output for next turn context.
+        env_session = state.get("env")
+        tool_call, tool_result = execute_first_tool_call(env_session=env_session, response=response)
+        if tool_result is not None:
+            # For OpenAI chat.completions, tool messages must follow an assistant
+            # message that contains the corresponding tool_calls.
+            assistant_content = getattr(response.choices[0].message, "content", "") or ""
+            assistant_msg: Dict[str, Any] = {"role": "assistant", "content": assistant_content}
+            if tool_call is not None:
+                assistant_msg["tool_calls"] = [
+                    {
+                        "id": tool_call.tool_call_id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_call.name,
+                            "arguments": __import__("json").dumps(
+                                tool_call.arguments, separators=(",", ":"), ensure_ascii=False
+                            ),
+                        },
+                    }
+                ]
+            conversation["history_messages"].append(assistant_msg)
+
+            # Append tool output as a tool role message for next turn.
+            conversation["history_messages"].append(
+                {
+                    "role": "tool",
+                    "content": tool_result.output,
+                    # For OpenAI chat completions, tool_call_id is optional in most backends;
+                    # we keep it for debugging/compat if available.
+                    **({"tool_call_id": tool_result.tool_call_id} if tool_result.tool_call_id else {}),
+                }
+            )
+            turn_index = conversation["current_turn_index"]
+            if 0 <= turn_index < len(conversation.get("tool_outputs", [])):
+                conversation["tool_outputs"][turn_index] = tool_result.output
+            # Record lightweight tool result memory item: "tool call + result".
+            selected_calls = conversation.get("history_calls", [])
+            tool_call_str = ""
+            if 0 <= turn_index < len(selected_calls) and selected_calls[turn_index]:
+                tool_call_str = str(selected_calls[turn_index][0])
+            elif tool_call is not None:
+                tool_call_str = f"{tool_call.name}(...)"
+
+            memory_items: List[Dict[str, Any]] = conversation.get("tool_result_memory_items", [])
+            memory_items.append(
+                {
+                    "turn": turn_index,
+                    "tool_call": tool_call_str,
+                    "tool_result": (
+                        self._observation_from_tool_result(
+                            tool_call_str,
+                            self._truncate_tool_output(str(tool_result.output)),
+                        )
+                        if self.memory_mode == "tool_result_memory_v2"
+                        else self._truncate_tool_output(str(tool_result.output))
+                    ),
+                }
+            )
+            conversation["tool_result_memory_items"] = memory_items
+
         # Optional per-turn debug trace.
         if self.debug_mode:
             turn_index: int = conversation["current_turn_index"]
@@ -311,9 +543,12 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             user_text = turn_texts[turn_index] if turn_index < len(turn_texts) else ""
             history_calls: List[List[str]] = conversation.get("history_calls", [])
             tools_per_turn: List[List[str]] = conversation.get("tools_per_turn", [])
+            tool_outputs: List[str] = conversation.get("tool_outputs", [])
+            injected_memory_block = ""
 
             available_tools = tools_per_turn[turn_index] if turn_index < len(tools_per_turn) else []
             selected_calls = history_calls[turn_index] if turn_index < len(history_calls) else []
+            tool_output = tool_outputs[turn_index] if turn_index < len(tool_outputs) else ""
 
             print(f"[Bella][multi_turn_base][debug] turn={turn_index}")
             print(f"[Bella][multi_turn_base][debug] user_request={user_text!r}")
@@ -334,10 +569,26 @@ class MultiTurnBaseAdapter(BFCLAdapter):
                 print(
                     "[Bella][multi_turn_base][debug] injected_action_history=<none>"
                 )
+            if self.memory_mode in ("tool_result_memory", "tool_result_memory_v2"):
+                injected_memory_block = self._build_tool_result_memory_block(state, turn_index)
+                if injected_memory_block:
+                    print(
+                        f"[Bella][multi_turn_base][debug] injected_{self.memory_mode}="
+                        + injected_memory_block
+                    )
+                else:
+                    print(f"[Bella][multi_turn_base][debug] injected_{self.memory_mode}=<none>")
+            else:
+                print("[Bella][multi_turn_base][debug] injected_tool_result_memory=<none>")
 
             print(
                 f"[Bella][multi_turn_base][debug] selected_calls={selected_calls}"
             )
+            if selected_calls:
+                print(f"[Bella][multi_turn_base][debug] tool_call_first={selected_calls[0]}")
+            print(f"[Bella][multi_turn_base][debug] tool_response={tool_output!r}")
+            tail = conversation["history_messages"][-3:]
+            print(f"[Bella][multi_turn_base][debug] next_messages_tail={tail!r}")
 
         return BellaResult(
             id=entry["id"],
@@ -382,9 +633,8 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         )
 
     def result_group(self, category: str) -> str:
-        # multi_turn_base 属于 multi_turn 分组
-        return "multi_turn"
+        return _CATEGORIES.get(category, {}).get("result_group", "multi_turn")
 
     def result_filename(self, category: str) -> str:
-        return "BFCL_v4_multi_turn_base_result.json"
+        return _CATEGORIES.get(category, {}).get("result_filename", "BFCL_v4_multi_turn_base_result.json")
 

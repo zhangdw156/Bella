@@ -185,11 +185,12 @@ wheels = [
 [[package]]
 name = "bella"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "bfcl-eval" },
     { name = "openai" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "soundfile" },
 ]
 
@@ -198,6 +199,7 @@ requires-dist = [
     { name = "bfcl-eval", specifier = "==2025.10.27.1" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "python-dotenv" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "soundfile", specifier = ">=0.13.1" },
 ]
 

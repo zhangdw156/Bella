@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from bella.bfcl_resources import load_bfcl_categories, load_prompt_system, render_user_prompt
 from bella.infer.types import BellaRequest, BellaResult
 from bella.infer.adapters.base import BFCLAdapter, register_adapter
 from bella.infer.adapters.common import (
@@ -10,39 +11,31 @@ from bella.infer.adapters.common import (
     extract_usage,
 )
 
+_CATEGORIES = load_bfcl_categories()
+
+
+def _extract_user_text(question: Any) -> str:
+    """Extract first user utterance from BFCL question (single-turn non-live)."""
+    if isinstance(question, list) and question and isinstance(question[0], list):
+        first_turn = question[0]
+        if first_turn and isinstance(first_turn[0], dict):
+            return first_turn[0].get("content", "")
+        return str(question)
+    return str(question)
+
 
 def _build_messages_and_tools(entry: Dict[str, Any]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     test_id = entry.get("id", "")
     question = entry.get("question", [])
     functions = entry.get("function", [])
 
-    system_content = (
-        "You are a function calling model. "
-        "Given a user question and a set of available functions, "
-        "you must choose the most appropriate function and provide arguments "
-        "as a JSON object that satisfies the given JSON schema."
-    )
-
-    # Extract first user utterance from BFCL question (single-turn non-live).
-    if isinstance(question, list) and question and isinstance(question[0], list):
-        first_turn = question[0]
-        if first_turn and isinstance(first_turn[0], dict):
-            user_text = first_turn[0].get("content", "")
-        else:
-            user_text = str(question)
-    else:
-        user_text = str(question)
+    system_content = load_prompt_system("simple_python")
+    user_text = _extract_user_text(question)
+    user_content = render_user_prompt("simple_python", test_id=test_id, user_text=user_text)
 
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": system_content},
-        {
-            "role": "user",
-            "content": (
-                f"BFCL test id: {test_id}\n"
-                f"User question:\n{user_text}\n\n"
-                "Choose ONE function from the provided tools and provide only JSON arguments."
-            ),
-        },
+        {"role": "user", "content": user_content},
     ]
 
     tools = build_tools_from_functions(functions)
@@ -78,8 +71,8 @@ class SimplePythonAdapter(BFCLAdapter):
         )
 
     def result_group(self, category: str) -> str:
-        return "non_live"
+        return _CATEGORIES.get(category, {}).get("result_group", "non_live")
 
     def result_filename(self, category: str) -> str:
-        return "BFCL_v4_simple_python_result.json"
+        return _CATEGORIES.get(category, {}).get("result_filename", "BFCL_v4_simple_python_result.json")
 

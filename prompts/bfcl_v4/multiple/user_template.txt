@@ -1,0 +1,5 @@
+BFCL test id: {test_id}
+User question:
+{user_text}
+
+Select ONE function from the provided tools and return only its JSON arguments.

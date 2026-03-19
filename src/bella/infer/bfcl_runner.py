@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from typing import Any, Iterable, List
 
@@ -24,19 +25,17 @@ def run_bfcl_infer(category: str = "simple_python", limit: int = 3) -> None:
     """
     settings = load_settings()
 
-    # 延迟导入 BFCL 数据加载和结果路径工具，确保 BFCL_PROJECT_ROOT 已由 load_settings 写入环境变量。
+    # 延迟导入 BFCL 结果路径与定位工具（evaluator 仍用 BFCL）；数据改用 Bella 镜像。
     from bfcl_eval.constants.eval_config import RESULT_PATH
-    from bfcl_eval.utils import find_file_by_category, load_dataset_entry
+    from bfcl_eval.utils import find_file_by_category
+
+    from bella.bfcl_resources import load_bella_dataset
 
     adapter = get_adapter(category)
     client = OpenAIClient()
 
-    # Load BFCL official dataset entries for the given category.
-    entries = load_dataset_entry(
-        category,
-        include_prereq=False,
-        include_language_specific_hint=True,
-    )
+    # Load dataset from Bella mirrored data (no BFCL runtime data loader).
+    entries = load_bella_dataset(category)
 
     if not entries:
         raise RuntimeError(f"No BFCL entries found for category '{category}'.")
@@ -90,4 +89,24 @@ def run_bfcl_infer(category: str = "simple_python", limit: int = 3) -> None:
             f"[Bella] BFCL inference done for category='{category}', "
             f"but BFCL locator could not find result file under RESULT_PATH={RESULT_PATH}."
         )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run BFCL inference via Bella using BFCL official handlers."
+    )
+    parser.add_argument(
+        "--category",
+        type=str,
+        default="simple_python",
+        help="BFCL test category to run (default: simple_python).",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=3,
+        help="Maximum number of test entries to run (default: 3).",
+    )
+    args = parser.parse_args()
+    run_bfcl_infer(category=args.category, limit=args.limit)
 

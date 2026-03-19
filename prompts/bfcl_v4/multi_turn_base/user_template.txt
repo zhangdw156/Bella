@@ -1,0 +1,8 @@
+BFCL test id: {test_id}
+Current turn index: {turn_index}
+User request for this turn:
+{user_text}
+{action_history_section}
+{tool_result_memory_section}
+
+Use exactly one tool function call at this turn and only provide JSON arguments.
