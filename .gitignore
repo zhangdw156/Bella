@@ -47,3 +47,5 @@ opencode.json
 
 # harness
 workspace/
+
+logs/
