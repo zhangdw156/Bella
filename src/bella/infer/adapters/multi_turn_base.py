@@ -146,7 +146,7 @@ class MultiTurnBaseAdapter(BFCLAdapter):
 
         blocks = self.memory_plugin.build_prompt_blocks(entry, state, turn_index)
         user_content = render_user_prompt(
-            "multi_turn_base",
+            "multi_turn",
             test_id=test_id,
             turn_index=turn_index,
             user_text=user_text,
@@ -155,7 +155,7 @@ class MultiTurnBaseAdapter(BFCLAdapter):
 
         history_messages: List[Dict[str, Any]] = conversation["history_messages"]
         if not history_messages:
-            system_content = load_prompt_system("multi_turn_base")
+            system_content = load_prompt_system("multi_turn")
             history_messages.append({"role": "system", "content": system_content})
 
         history_messages.append({"role": "user", "content": user_content})
