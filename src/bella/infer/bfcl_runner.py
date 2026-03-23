@@ -40,8 +40,15 @@ def run_bfcl_infer(category: str = "simple_python", limit: int = 3) -> None:
     if not entries:
         raise RuntimeError(f"No BFCL entries found for category '{category}'.")
 
+    selected_entries = list(iter_limited(entries, limit))
+    total_entries = len(selected_entries)
+
     results: List[BellaResult] = []
-    for entry in iter_limited(entries, limit):
+    for idx, entry in enumerate(selected_entries, start=1):
+        entry_id = entry.get("id", "<unknown>")
+        print(
+            f"[Bella] Inference progress: category='{category}' entry {idx}/{total_entries} id='{entry_id}'"
+        )
         # Per-entry state to support both single-turn and multi-turn adapters.
         state_for_entry: dict[str, Any] = adapter.init_state(entry)
         last_bella_result: BellaResult | None = None
@@ -109,4 +116,3 @@ def main() -> None:
     )
     args = parser.parse_args()
     run_bfcl_infer(category=args.category, limit=args.limit)
-

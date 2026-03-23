@@ -6,7 +6,7 @@ import json
 
 from bella.bfcl_resources import load_bfcl_categories, load_prompt_system, render_user_prompt
 from bella.env.bfcl_multi_turn import BFCLMultiTurnEnvironmentSession
-from bella.env.tool_executor import execute_first_tool_call
+from bella.env.tool_executor import execute_tool_calls
 from bella.memory import get_plugin
 from bella.infer.types import BellaRequest, BellaResult
 from bella.infer.adapters.base import BFCLAdapter, register_adapter
@@ -68,6 +68,7 @@ class MultiTurnBaseAdapter(BFCLAdapter):
     def __init__(self) -> None:
         self.memory_plugin = get_plugin()
         self._memory_mode: str = os.getenv("BELLA_MULTI_TURN_MEMORY_MODE", "none").strip().lower()
+        self.max_steps_per_turn: int = int(os.getenv("BELLA_MULTI_TURN_MAX_STEPS_PER_TURN", "8"))
         self.debug_mode: bool = os.getenv("BELLA_MULTI_TURN_DEBUG", "0") not in (
             "0",
             "",
@@ -91,11 +92,20 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             "history_calls": [[] for _ in range(num_turns)],
             "tools_per_turn": [[] for _ in range(num_turns)],
             "tool_outputs": ["" for _ in range(num_turns)],
+            "turn_user_appended": [False for _ in range(num_turns)],
+            "turn_step_counts": [0 for _ in range(num_turns)],
+            "turn_complete": [False for _ in range(num_turns)],
+            "finished": False,
         }
         self.memory_plugin.init_state(conversation)
 
         execution: Dict[str, Any] = {
             "function_calls": [[] for _ in range(num_turns)],
+        }
+
+        usage: Dict[str, Any] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
         }
 
         env_session = BFCLMultiTurnEnvironmentSession(
@@ -110,6 +120,7 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             "conversation": conversation,
             "execution": execution,
             "env": env_session,
+            "usage": usage,
         }
 
     def _append_user_message_for_turn(self, entry: Dict[str, Any], state: Dict[str, Any]) -> None:
@@ -138,6 +149,7 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             history_messages.append({"role": "system", "content": system_content})
 
         history_messages.append({"role": "user", "content": user_content})
+        conversation["turn_user_appended"][turn_index] = True
 
     def build_request(self, entry: Dict[str, Any], state: Dict[str, Any]) -> BellaRequest:
         conversation = state["conversation"]
@@ -149,7 +161,8 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             current_turn_index = num_turns - 1
             conversation["current_turn_index"] = current_turn_index
 
-        self._append_user_message_for_turn(entry, state)
+        if not conversation["turn_user_appended"][current_turn_index]:
+            self._append_user_message_for_turn(entry, state)
         messages: List[Dict[str, Any]] = conversation["history_messages"]
 
         functions = entry.get("function", [])
@@ -174,13 +187,13 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             temperature=0.0,
         )
 
-    def _append_function_call_for_turn(
+    def _append_function_calls_for_turn(
         self,
         entry: Dict[str, Any],
         response: Any,
         state: Dict[str, Any],
-    ) -> None:
-        """Extract exactly one tool call from the current response and append to execution.function_calls."""
+    ) -> int:
+        """Extract all tool calls from the current response and append them to execution.function_calls."""
         conversation = state["conversation"]
         execution = state["execution"]
 
@@ -191,30 +204,36 @@ class MultiTurnBaseAdapter(BFCLAdapter):
 
         tool_calls = getattr(response.choices[0].message, "tool_calls", None)
         if not tool_calls:
-            return
+            return 0
 
-        first_call = tool_calls[0]
-        func = getattr(first_call, "function", None)
-        if not func:
-            return
+        appended = 0
+        for call in tool_calls:
+            func = getattr(call, "function", None)
+            if not func:
+                continue
 
-        name = getattr(func, "name", None)
-        arguments = getattr(func, "arguments", "") or ""
-        if not name:
-            return
+            name = getattr(func, "name", None)
+            arguments = getattr(func, "arguments", "") or ""
+            if not name:
+                continue
 
-        try:
-            args_obj = json.loads(arguments)
-        except Exception:
-            function_calls[turn_index].append({name: arguments})
-            return
+            try:
+                args_obj = json.loads(arguments)
+            except Exception:
+                function_calls[turn_index].append({name: arguments})
+                appended += 1
+                continue
 
-        if not isinstance(args_obj, dict):
-            function_calls[turn_index].append({name: json.dumps(args_obj, separators=(",", ":"))})
-            return
+            if not isinstance(args_obj, dict):
+                function_calls[turn_index].append({name: json.dumps(args_obj, separators=(",", ":"))})
+                appended += 1
+                continue
 
-        args_json = json.dumps(args_obj, separators=(",", ":"))
-        function_calls[turn_index].append({name: args_json})
+            args_json = json.dumps(args_obj, separators=(",", ":"))
+            function_calls[turn_index].append({name: args_json})
+            appended += 1
+
+        return appended
 
     def _format_execution_history(self, execution: Dict[str, Any]) -> List[List[str]]:
         """Convert execution.function_calls into human-readable strings for conversation.history_calls."""
@@ -250,62 +269,77 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         response: Any,
         state: Dict[str, Any],
     ) -> BellaResult:
-        self._append_function_call_for_turn(entry, response, state)
+        appended_count = self._append_function_calls_for_turn(entry, response, state)
 
         input_tokens, output_tokens = extract_usage(response)
+        state["usage"]["input_tokens"] += input_tokens
+        state["usage"]["output_tokens"] += output_tokens
 
         execution = state["execution"]
         function_calls: List[List[Dict[str, str]]] = execution["function_calls"]
 
         conversation = state["conversation"]
         conversation["history_calls"] = self._format_execution_history(execution)
+        turn_index = conversation["current_turn_index"]
+        conversation["turn_step_counts"][turn_index] += 1
 
         env_session = state.get("env")
-        tool_call, tool_result = execute_first_tool_call(env_session=env_session, response=response)
-        if tool_result is not None:
-            assistant_content = getattr(response.choices[0].message, "content", "") or ""
-            assistant_msg: Dict[str, Any] = {"role": "assistant", "content": assistant_content}
-            if tool_call is not None:
-                assistant_msg["tool_calls"] = [
-                    {
-                        "id": tool_call.tool_call_id,
-                        "type": "function",
-                        "function": {
-                            "name": tool_call.name,
-                            "arguments": json.dumps(
-                                tool_call.arguments, separators=(",", ":"), ensure_ascii=False
-                            ),
-                        },
-                    }
-                ]
-            conversation["history_messages"].append(assistant_msg)
-
-            conversation["history_messages"].append(
+        executed_pairs = execute_tool_calls(env_session=env_session, response=response)
+        assistant_content = getattr(response.choices[0].message, "content", "") or ""
+        assistant_msg: Dict[str, Any] = {"role": "assistant", "content": assistant_content}
+        if executed_pairs:
+            assistant_msg["tool_calls"] = [
                 {
-                    "role": "tool",
-                    "content": tool_result.output,
-                    **({"tool_call_id": tool_result.tool_call_id} if tool_result.tool_call_id else {}),
+                    "id": tool_call.tool_call_id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_call.name,
+                        "arguments": json.dumps(
+                            tool_call.arguments, separators=(",", ":"), ensure_ascii=False
+                        ),
+                    },
                 }
-            )
-            turn_index = conversation["current_turn_index"]
-            if 0 <= turn_index < len(conversation.get("tool_outputs", [])):
-                conversation["tool_outputs"][turn_index] = tool_result.output
+                for tool_call, _ in executed_pairs
+            ]
+        conversation["history_messages"].append(assistant_msg)
 
+        if executed_pairs:
+            last_tool_output = ""
             selected_calls = conversation.get("history_calls", [])
-            tool_call_str = ""
-            if 0 <= turn_index < len(selected_calls) and selected_calls[turn_index]:
-                tool_call_str = str(selected_calls[turn_index][0])
-            elif tool_call is not None:
-                tool_call_str = f"{tool_call.name}(...)"
-            self.memory_plugin.on_tool_result(
-                conversation,
-                turn_index,
-                tool_call_str,
-                str(tool_result.output),
+            selected_for_turn = (
+                selected_calls[turn_index] if 0 <= turn_index < len(selected_calls) else []
             )
+            for pair_index, (tool_call, tool_result) in enumerate(executed_pairs):
+                conversation["history_messages"].append(
+                    {
+                        "role": "tool",
+                        "content": tool_result.output,
+                        **({"tool_call_id": tool_result.tool_call_id} if tool_result.tool_call_id else {}),
+                    }
+                )
+                tool_call_str = (
+                    str(selected_for_turn[pair_index])
+                    if pair_index < len(selected_for_turn)
+                    else f"{tool_call.name}(...)"
+                )
+                self.memory_plugin.on_tool_result(
+                    conversation,
+                    turn_index,
+                    tool_call_str,
+                    str(tool_result.output),
+                )
+                last_tool_output = tool_result.output
+
+            if 0 <= turn_index < len(conversation.get("tool_outputs", [])):
+                conversation["tool_outputs"][turn_index] = last_tool_output
+
+        turn_complete = appended_count == 0 or not executed_pairs
+        too_many_steps = conversation["turn_step_counts"][turn_index] >= self.max_steps_per_turn
+        if too_many_steps:
+            turn_complete = True
+        conversation["turn_complete"][turn_index] = turn_complete
 
         if self.debug_mode:
-            turn_index = conversation["current_turn_index"]
             turn_texts = conversation.get("turn_texts", [])
             user_text = turn_texts[turn_index] if turn_index < len(turn_texts) else ""
             history_calls = conversation.get("history_calls", [])
@@ -352,8 +386,8 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         return BellaResult(
             id=entry["id"],
             result=function_calls,
-            input_token_count=input_tokens,
-            output_token_count=output_tokens,
+            input_token_count=state["usage"]["input_tokens"],
+            output_token_count=state["usage"]["output_tokens"],
             latency=0.0,
         )
 
@@ -364,10 +398,16 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         current_turn_index = conversation["current_turn_index"]
         num_turns = len(execution["function_calls"])
 
+        if not conversation["turn_complete"][current_turn_index]:
+            return True
+
         if current_turn_index >= num_turns - 1:
+            conversation["finished"] = True
             return False
 
         conversation["current_turn_index"] = current_turn_index + 1
+        next_turn_index = conversation["current_turn_index"]
+        conversation["turn_user_appended"][next_turn_index] = False
         return True
 
     def finalize_result(
@@ -382,8 +422,8 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         return BellaResult(
             id=entry["id"],
             result=function_calls,
-            input_token_count=last_result.input_token_count,
-            output_token_count=last_result.output_token_count,
+            input_token_count=state["usage"]["input_tokens"],
+            output_token_count=state["usage"]["output_tokens"],
             latency=last_result.latency,
             extra=last_result.extra,
         )

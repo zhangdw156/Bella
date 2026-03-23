@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from bella.config import load_settings
 from bella.utils.bfcl_compat import ensure_bfcl_model_alias
@@ -24,13 +25,16 @@ def run_bfcl_eval(category: str = "simple_python", partial_eval: bool = True) ->
     from bfcl_eval.eval_checker import eval_runner
     from bfcl_eval.utils import find_file_by_category
 
+    isolated_score_dir = Path(SCORE_PATH) / "__bella_isolated_eval__" / settings.bfcl_registry_name.replace("/", "_")
+    isolated_score_dir.mkdir(parents=True, exist_ok=True)
+
     # Run official evaluator. We use partial_eval=True because Bella only
     # generates a subset of test entries in the MVP.
     eval_runner.main(
         model=[settings.bfcl_registry_name],
         test_categories=[category],
         result_dir=None,
-        score_dir=None,
+        score_dir=isolated_score_dir,
         partial_eval=partial_eval,
     )
 
@@ -38,7 +42,7 @@ def run_bfcl_eval(category: str = "simple_python", partial_eval: bool = True) ->
     try:
         score_file = find_file_by_category(
             category,
-            SCORE_PATH / settings.bfcl_registry_name.replace("/", "_"),
+            isolated_score_dir / settings.bfcl_registry_name.replace("/", "_"),
             is_score_file=True,
         )
         print(f"[Bella] BFCL evaluation done. Category='{category}'.")
@@ -72,4 +76,3 @@ def main() -> None:
 
     partial_eval = not args.no_partial_eval
     run_bfcl_eval(category=args.category, partial_eval=partial_eval)
-

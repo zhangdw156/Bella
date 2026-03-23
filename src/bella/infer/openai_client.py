@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Iterable, List, Mapping, MutableMapping
 
 from openai import OpenAI
@@ -18,9 +19,11 @@ class OpenAIClient:
 
     def __init__(self) -> None:
         settings = load_settings()
+        request_timeout_s = float(os.getenv("BELLA_OPENAI_TIMEOUT_SECONDS", "120"))
 
         client_kwargs: dict[str, Any] = {
             "api_key": settings.openai_api_key,
+            "timeout": request_timeout_s,
         }
         if settings.openai_base_url:
             client_kwargs["base_url"] = settings.openai_base_url
@@ -56,4 +59,3 @@ class OpenAIClient:
                 kwargs["tool_choice"] = tool_choice
 
         return self._client.chat.completions.create(**kwargs)
-

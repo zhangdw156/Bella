@@ -20,7 +20,9 @@ def ensure_bfcl_model_alias(
       使用与 registry_name 一致的子目录结构。
     """
     from bfcl_eval.constants.model_config import MODEL_CONFIG_MAPPING
-    if registry_name in MODEL_CONFIG_MAPPING:
+
+    alias_names = {registry_name, registry_name.replace("_", "/")}
+    if alias_names.issubset(MODEL_CONFIG_MAPPING):
         return
 
     if base_model not in MODEL_CONFIG_MAPPING:
@@ -29,5 +31,5 @@ def ensure_bfcl_model_alias(
             f"cannot create alias for custom registry name '{registry_name}'."
         )
 
-    MODEL_CONFIG_MAPPING[registry_name] = MODEL_CONFIG_MAPPING[base_model]
-
+    for alias_name in alias_names:
+        MODEL_CONFIG_MAPPING.setdefault(alias_name, MODEL_CONFIG_MAPPING[base_model])
