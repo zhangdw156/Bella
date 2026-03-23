@@ -22,11 +22,16 @@ def main() -> None:
         default=3,
         help="Maximum number of test entries to run (default: 3).",
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help="Maximum number of concurrent entry workers.",
+    )
     args = parser.parse_args()
 
-    run_bfcl_infer(category=args.category, limit=args.limit)
+    run_bfcl_infer(category=args.category, limit=args.limit, max_workers=args.max_workers)
 
 
 if __name__ == "__main__":
     main()
-
