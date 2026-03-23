@@ -12,3 +12,15 @@ multiple:
 multi_turn_base:
   result_group: multi_turn
   result_filename: BFCL_v4_multi_turn_base_result.json
+
+multi_turn_miss_func:
+  result_group: multi_turn
+  result_filename: BFCL_v4_multi_turn_miss_func_result.json
+
+multi_turn_miss_param:
+  result_group: multi_turn
+  result_filename: BFCL_v4_multi_turn_miss_param_result.json
+
+multi_turn_long_context:
+  result_group: multi_turn
+  result_filename: BFCL_v4_multi_turn_long_context_result.json

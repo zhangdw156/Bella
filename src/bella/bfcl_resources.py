@@ -122,7 +122,7 @@ def load_bella_dataset(category: str) -> list[dict]:
                 continue
             entries.append(json.loads(line))
 
-    if category == "multi_turn_base":
+    if category.startswith("multi_turn_"):
         for entry in entries:
             involved = entry.get("involved_classes", [])
             entry["function"] = load_multi_turn_functions(involved)

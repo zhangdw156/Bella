@@ -19,6 +19,9 @@ _DATASET_FILES = {
     "simple_python": "BFCL_v4_simple_python.json",
     "multiple": "BFCL_v4_multiple.json",
     "multi_turn_base": "BFCL_v4_multi_turn_base.json",
+    "multi_turn_miss_func": "BFCL_v4_multi_turn_miss_func.json",
+    "multi_turn_miss_param": "BFCL_v4_multi_turn_miss_param.json",
+    "multi_turn_long_context": "BFCL_v4_multi_turn_long_context.json",
 }
 
 # involved_classes -> func doc filename (from MULTI_TURN_FUNC_DOC_FILE_MAPPING)

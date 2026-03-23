@@ -11,6 +11,7 @@ from bella.memory import get_plugin
 from bella.infer.types import BellaRequest, BellaResult
 from bella.infer.adapters.base import BFCLAdapter, register_adapter
 from bella.infer.adapters.common import build_tools_from_functions, extract_usage
+from bfcl_eval.constants.default_prompts import DEFAULT_USER_PROMPT_FOR_ADDITIONAL_FUNCTION_FC
 
 _CATEGORIES = load_bfcl_categories()
 
@@ -43,6 +44,9 @@ def _extract_turn_user_texts(question: Any) -> List[str]:
     return turn_texts
 
 
+@register_adapter("multi_turn_long_context")
+@register_adapter("multi_turn_miss_param")
+@register_adapter("multi_turn_miss_func")
 @register_adapter("multi_turn_base")
 class MultiTurnBaseAdapter(BFCLAdapter):
     """
@@ -101,6 +105,8 @@ class MultiTurnBaseAdapter(BFCLAdapter):
 
         execution: Dict[str, Any] = {
             "function_calls": [[] for _ in range(num_turns)],
+            "functions": list(entry.get("function", [])),
+            "holdout_injected_turns": set(),
         }
 
         usage: Dict[str, Any] = {
@@ -134,6 +140,10 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         else:
             user_text = ""
 
+        missed_function = entry.get("missed_function", {})
+        if not user_text and str(turn_index) in missed_function:
+            user_text = DEFAULT_USER_PROMPT_FOR_ADDITIONAL_FUNCTION_FC
+
         blocks = self.memory_plugin.build_prompt_blocks(entry, state, turn_index)
         user_content = render_user_prompt(
             "multi_turn_base",
@@ -161,11 +171,26 @@ class MultiTurnBaseAdapter(BFCLAdapter):
             current_turn_index = num_turns - 1
             conversation["current_turn_index"] = current_turn_index
 
+        missed_function = entry.get("missed_function", {})
+        holdout_turns = execution.get("holdout_injected_turns", set())
+        holdout_turn_key = str(current_turn_index)
+        if holdout_turn_key in missed_function and holdout_turn_key not in holdout_turns:
+            current_functions = execution.get("functions", [])
+            for fn_name in missed_function[holdout_turn_key]:
+                if any(fn.get("name") == fn_name for fn in current_functions):
+                    continue
+                for fn in entry.get("function", []):
+                    if fn.get("name") == fn_name:
+                        current_functions.append(fn)
+                        break
+            execution["functions"] = current_functions
+            holdout_turns.add(holdout_turn_key)
+
         if not conversation["turn_user_appended"][current_turn_index]:
             self._append_user_message_for_turn(entry, state)
         messages: List[Dict[str, Any]] = conversation["history_messages"]
 
-        functions = entry.get("function", [])
+        functions = execution.get("functions", entry.get("function", []))
         tools = build_tools_from_functions(functions)
 
         tool_names: List[str] = []
