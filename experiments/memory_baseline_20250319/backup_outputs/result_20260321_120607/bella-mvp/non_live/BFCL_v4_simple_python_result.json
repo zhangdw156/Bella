@@ -1,1 +1,0 @@
-{"id": "simple_python_0", "result": [{"calculate_triangle_area": "{\"base\":10,\"height\":5,\"unit\":\"units\"}"}], "input_token_count": 317, "output_token_count": 97, "latency": 0.0}

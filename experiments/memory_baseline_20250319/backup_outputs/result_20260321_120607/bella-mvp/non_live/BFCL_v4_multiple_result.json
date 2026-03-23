@@ -1,1 +1,0 @@
-{"id": "multiple_0", "result": [{"triangle_properties_get": "{\"side1\":5,\"side2\":4,\"side3\":3}"}], "input_token_count": 626, "output_token_count": 284, "latency": 0.0}

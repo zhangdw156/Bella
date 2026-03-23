@@ -1,1 +1,0 @@
-{"id": "multi_turn_base_0", "result": [[{"pwd": "{}"}], [{"cd": "{\"folder\":\"document\"}"}], [{"ls": "{}"}], [{"mkdir": "{\"dir_name\":\"temp\"}"}]], "input_token_count": 4838, "output_token_count": 549, "latency": 0.0}
