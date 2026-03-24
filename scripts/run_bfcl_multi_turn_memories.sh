@@ -125,6 +125,15 @@ import json
 import os
 from pathlib import Path
 
+
+def load_score_header(score_path: Path) -> dict[str, object]:
+    """BFCL score files are JSONL: first line is the summary header."""
+    with score_path.open(encoding="utf-8") as f:
+        first_line = f.readline().strip()
+    if not first_line:
+        return {}
+    return json.loads(first_line)
+
 output_root = Path(os.environ["BELLA_BATCH_OUTPUT_ROOT"])
 summary_csv = Path(os.environ["BELLA_SUMMARY_CSV"])
 summary_json = Path(os.environ["BELLA_SUMMARY_JSON"])
@@ -183,9 +192,7 @@ for memory_mode in memory_modes:
             row["infer_exit_code"] = status_payload.get("infer_exit_code", "")
             row["eval_exit_code"] = status_payload.get("eval_exit_code", "")
         if score_path.exists():
-            with score_path.open(encoding="utf-8") as f:
-                payload = json.load(f)
-            header = payload[0] if isinstance(payload, list) and payload else {}
+            header = load_score_header(score_path)
             accuracy = header.get("accuracy", "")
             row.update(
                 {
