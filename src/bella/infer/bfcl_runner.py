@@ -49,6 +49,29 @@ def _run_single_entry(category: str, entry: dict[str, Any]) -> BellaResult:
     return adapter.finalize_result(entry, state_for_entry, last_bella_result)
 
 
+def _build_failed_result(entry: dict[str, Any], exc: Exception) -> BellaResult:
+    entry_id = str(entry.get("id", ""))
+    return BellaResult(
+        id=entry_id,
+        result=[],
+        input_token_count=0,
+        output_token_count=0,
+        latency=0.0,
+        extra={
+            "failed": True,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+        },
+    )
+
+
+def _run_single_entry_safe(category: str, entry: dict[str, Any]) -> BellaResult:
+    try:
+        return _run_single_entry(category, entry)
+    except Exception as exc:
+        return _build_failed_result(entry, exc)
+
+
 def run_bfcl_infer(
     category: str = "simple_python",
     limit: int = 3,
@@ -119,7 +142,7 @@ def run_bfcl_infer(
                     entry = next(pending_iter)
                 except StopIteration:
                     break
-                future = pool.submit(_run_single_entry, category, entry)
+                future = pool.submit(_run_single_entry_safe, category, entry)
                 in_flight[future] = str(entry.get("id", ""))
 
             while in_flight:
@@ -131,17 +154,25 @@ def run_bfcl_infer(
                         upsert_result_jsonl(result, result_file)
                         completed_count += 1
                     entry_index = entry_id_to_index.get(entry_id, completed_count)
-                    print(
-                        f"[Bella] Inference progress: category='{category}' "
-                        f"entry {entry_index}/{total_entries} id='{entry_id}'"
-                    )
+                    if result.extra and result.extra.get("failed"):
+                        print(
+                            f"[Bella] Inference failed: category='{category}' "
+                            f"entry {entry_index}/{total_entries} id='{entry_id}' "
+                            f"error_type='{result.extra.get('error_type', '')}' "
+                            f"message={result.extra.get('error_message', '')!r}"
+                        )
+                    else:
+                        print(
+                            f"[Bella] Inference progress: category='{category}' "
+                            f"entry {entry_index}/{total_entries} id='{entry_id}'"
+                        )
 
                 while len(in_flight) < max_workers:
                     try:
                         entry = next(pending_iter)
                     except StopIteration:
                         break
-                    future = pool.submit(_run_single_entry, category, entry)
+                    future = pool.submit(_run_single_entry_safe, category, entry)
                     in_flight[future] = str(entry.get("id", ""))
 
     # Try to locate the result file for this category via BFCL helper for sanity.

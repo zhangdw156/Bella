@@ -6,8 +6,8 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 # Tunables
-: "${BELLA_ENTRY_WORKERS:=8}"
-: "${BELLA_OUTER_JOBS:=4}"
+: "${BELLA_ENTRY_WORKERS:=16}"
+: "${BELLA_OUTER_JOBS:=2}"
 : "${BELLA_OPENAI_TIMEOUT_SECONDS:=240}"
 : "${BELLA_MULTI_TURN_MAX_STEPS_PER_TURN:=8}"
 : "${BELLA_BATCH_OUTPUT_ROOT:=$ROOT_DIR/outputs/bfcl_batch}"
@@ -33,19 +33,24 @@ mkdir -p "$BELLA_BATCH_OUTPUT_ROOT" "$BELLA_BATCH_LOG_ROOT"
 summary_csv="$BELLA_BATCH_OUTPUT_ROOT/${BELLA_SUMMARY_BASENAME}.csv"
 summary_json="$BELLA_BATCH_OUTPUT_ROOT/${BELLA_SUMMARY_BASENAME}.json"
 
-run_one() {
-  local category="$1"
-  local memory_mode="$2"
-  local registry_name="bella-${category}-${memory_mode}"
+run_category() {
+  local memory_mode="$1"
+  local category="$2"
+  local registry_name="bella-multi-turn-${memory_mode}"
   local safe_registry_name="${registry_name//_/-}"
   local project_root="$BELLA_BATCH_OUTPUT_ROOT/${safe_registry_name}"
-  local log_file="$BELLA_BATCH_LOG_ROOT/${safe_registry_name}.log"
+  local status_dir="$project_root/job_status"
+  local status_file="$status_dir/${category}.json"
+  local log_file="$BELLA_BATCH_LOG_ROOT/${safe_registry_name}-${category//_/-}.log"
+  local infer_exit_code=0
+  local eval_exit_code=0
+  local final_status="ok"
 
-  mkdir -p "$project_root"
+  mkdir -p "$project_root" "$status_dir"
 
   {
     echo "[$(date '+%F %T')] START category=${category} memory=${memory_mode}"
-    env \
+    if env \
       PYTHONUNBUFFERED=1 \
       BELLA_OPENAI_TIMEOUT_SECONDS="$BELLA_OPENAI_TIMEOUT_SECONDS" \
       BELLA_MULTI_TURN_MAX_STEPS_PER_TURN="$BELLA_MULTI_TURN_MAX_STEPS_PER_TURN" \
@@ -56,33 +61,58 @@ run_one() {
       .venv/bin/python scripts/run_bfcl_infer.py \
         --category "$category" \
         --limit 0 \
-        --max-workers "$BELLA_ENTRY_WORKERS"
-    env \
-      PYTHONUNBUFFERED=1 \
-      BFCL_PROJECT_ROOT="$project_root" \
-      BFCL_REGISTRY_NAME="$safe_registry_name" \
-      .venv/bin/python scripts/run_bfcl_eval.py \
-        --category "$category" \
-        --no-partial-eval
-    echo "[$(date '+%F %T')] END category=${category} memory=${memory_mode}"
+        --max-workers "$BELLA_ENTRY_WORKERS"; then
+      if env \
+        PYTHONUNBUFFERED=1 \
+        BFCL_PROJECT_ROOT="$project_root" \
+        BFCL_REGISTRY_NAME="$safe_registry_name" \
+        .venv/bin/python scripts/run_bfcl_eval.py \
+          --category "$category" \
+          --no-partial-eval; then
+        :
+      else
+        eval_exit_code=$?
+        final_status="eval_failed"
+        echo "[$(date '+%F %T')] ERROR evaluation failed with exit code ${eval_exit_code}"
+      fi
+    else
+      infer_exit_code=$?
+      final_status="infer_failed"
+      echo "[$(date '+%F %T')] ERROR inference failed with exit code ${infer_exit_code}"
+    fi
+
+    cat >"$status_file" <<EOF
+{"category":"$category","memory_mode":"$memory_mode","registry_name":"$safe_registry_name","status":"$final_status","infer_exit_code":$infer_exit_code,"eval_exit_code":$eval_exit_code}
+EOF
+    echo "[$(date '+%F %T')] END category=${category} memory=${memory_mode} status=${final_status}"
   } >"$log_file" 2>&1
+}
+
+run_memory() {
+  local memory_mode="$1"
+  local registry_name="bella-multi-turn-${memory_mode}"
+  local safe_registry_name="${registry_name//_/-}"
+
+  for category in "${MULTI_TURN_CATEGORIES[@]}"; do
+    echo "Running memory=${memory_mode} category=${category} log=${BELLA_BATCH_LOG_ROOT}/${safe_registry_name}-${category//_/-}.log"
+    run_category "$memory_mode" "$category"
+  done
 }
 
 running_jobs=0
 
-for category in "${MULTI_TURN_CATEGORIES[@]}"; do
-  for memory_mode in "${MEMORY_MODES[@]}"; do
-    run_one "$category" "$memory_mode" &
-    running_jobs=$((running_jobs + 1))
+for memory_mode in "${MEMORY_MODES[@]}"; do
+  run_memory "$memory_mode" &
+  echo "Launched memory=${memory_mode} pid=$! output_root=${BELLA_BATCH_OUTPUT_ROOT}/bella-multi-turn-${memory_mode//_/-}"
+  running_jobs=$((running_jobs + 1))
 
-    if [ "$running_jobs" -ge "$BELLA_OUTER_JOBS" ]; then
-      wait -n
-      running_jobs=$((running_jobs - 1))
-    fi
-  done
+  if [ "$running_jobs" -ge "$BELLA_OUTER_JOBS" ]; then
+    wait -n || true
+    running_jobs=$((running_jobs - 1))
+  fi
 done
 
-wait
+wait || true
 
 BELLA_BATCH_OUTPUT_ROOT="$BELLA_BATCH_OUTPUT_ROOT" \
 BELLA_SUMMARY_CSV="$summary_csv" \
@@ -119,9 +149,9 @@ score_filenames = {
 }
 
 rows: list[dict[str, object]] = []
-for category in categories:
-    for memory_mode in memory_modes:
-        registry_name = f"bella-{category}-{memory_mode}".replace("_", "-")
+for memory_mode in memory_modes:
+    registry_name = f"bella-multi-turn-{memory_mode}".replace("_", "-")
+    for category in categories:
         score_path = (
             output_root
             / registry_name
@@ -133,15 +163,25 @@ for category in categories:
             / score_filenames[category]
         )
         row: dict[str, object] = {
-            "category": category,
             "memory_mode": memory_mode,
+            "category": category,
             "registry_name": registry_name,
             "score_file": str(score_path),
             "status": "missing",
+            "infer_exit_code": "",
+            "eval_exit_code": "",
             "accuracy": "",
+            "accuracy_percent": "",
             "correct_count": "",
             "total_count": "",
         }
+        status_path = output_root / registry_name / "job_status" / f"{category}.json"
+        if status_path.exists():
+            with status_path.open(encoding="utf-8") as f:
+                status_payload = json.load(f)
+            row["status"] = status_payload.get("status", "missing")
+            row["infer_exit_code"] = status_payload.get("infer_exit_code", "")
+            row["eval_exit_code"] = status_payload.get("eval_exit_code", "")
         if score_path.exists():
             with score_path.open(encoding="utf-8") as f:
                 payload = json.load(f)
@@ -151,11 +191,11 @@ for category in categories:
                 {
                     "status": "ok",
                     "accuracy": accuracy,
-                    "correct_count": header.get("correct_count", ""),
-                    "total_count": header.get("total_count", ""),
                     "accuracy_percent": round(float(accuracy) * 100, 2)
                     if accuracy != ""
                     else "",
+                    "correct_count": header.get("correct_count", ""),
+                    "total_count": header.get("total_count", ""),
                 }
             )
         rows.append(row)
@@ -164,10 +204,12 @@ with summary_csv.open("w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(
         f,
         fieldnames=[
-            "category",
             "memory_mode",
+            "category",
             "registry_name",
             "status",
+            "infer_exit_code",
+            "eval_exit_code",
             "accuracy",
             "accuracy_percent",
             "correct_count",
@@ -185,7 +227,7 @@ print(f"Summary CSV: {summary_csv}")
 print(f"Summary JSON: {summary_json}")
 PY
 
-echo "All BFCL multi-turn inference jobs finished."
+echo "All BFCL multi-turn jobs finished."
 echo "Logs: $BELLA_BATCH_LOG_ROOT"
 echo "Outputs: $BELLA_BATCH_OUTPUT_ROOT"
 echo "Summary CSV: $summary_csv"
