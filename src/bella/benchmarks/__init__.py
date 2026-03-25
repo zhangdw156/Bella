@@ -48,7 +48,8 @@ def list_benchmarks() -> list[str]:
 
 
 # Import sub-packages to trigger @register_benchmark decorators
-import bella.benchmarks.bfcl  # noqa: E402, F401
+import bella.benchmarks.bfcl    # noqa: E402, F401
+import bella.benchmarks.locomo  # noqa: E402, F401
 
 
 __all__ = [
