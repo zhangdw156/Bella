@@ -2,7 +2,7 @@
 Unified memory plugin layer for multi_turn_base.
 
 Switch via BELLA_MULTI_TURN_MEMORY_MODE:
-  none | action_history | tool_result_memory | tool_result_memory_v2
+  none | action_history | tool_result_memory | tool_result_memory_v2 | mem0
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import os
 from bella.memory.base import MemoryPlugin, NoOpMemory
 from bella.memory.plugins import (
     ActionHistoryPlugin,
+    Mem0MemoryPlugin,
     ToolResultMemoryPlugin,
     ToolResultMemoryV2Plugin,
 )
@@ -27,6 +28,8 @@ def get_plugin(mode: str | None = None) -> MemoryPlugin:
         return ToolResultMemoryPlugin()
     if mode == "tool_result_memory_v2":
         return ToolResultMemoryV2Plugin()
+    if mode == "mem0":
+        return Mem0MemoryPlugin()
     return NoOpMemory()
 
 
@@ -35,6 +38,7 @@ __all__ = [
     "NoOpMemory",
     "get_plugin",
     "ActionHistoryPlugin",
+    "Mem0MemoryPlugin",
     "ToolResultMemoryPlugin",
     "ToolResultMemoryV2Plugin",
 ]
