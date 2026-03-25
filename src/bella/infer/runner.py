@@ -27,8 +27,7 @@ def _iter_limited(entries: list[dict], limit: int | None) -> Iterable[dict]:
         yield from entries[:limit]
 
 
-def _run_single_entry(adapter: InferAdapter, entry: Dict[str, Any]) -> BellaResult:
-    client = OpenAIClient()
+def _run_single_entry(adapter: InferAdapter, entry: Dict[str, Any], client: OpenAIClient) -> BellaResult:
     state = adapter.init_state(entry)
     last_result: BellaResult | None = None
 
@@ -64,9 +63,9 @@ def _build_failed_result(entry: Dict[str, Any], exc: Exception) -> BellaResult:
     )
 
 
-def _run_single_entry_safe(adapter: InferAdapter, entry: Dict[str, Any]) -> BellaResult:
+def _run_single_entry_safe(adapter: InferAdapter, entry: Dict[str, Any], client: OpenAIClient) -> BellaResult:
     try:
-        return _run_single_entry(adapter, entry)
+        return _run_single_entry(adapter, entry, client)
     except Exception as exc:
         return _build_failed_result(entry, exc)
 
@@ -113,6 +112,7 @@ def run_infer(
         )
         return
 
+    client = OpenAIClient()
     session_id = f"{benchmark_name}/{category}"
     adapter.on_run_start(session_id)
 
@@ -122,7 +122,7 @@ def run_infer(
 
     try:
         _run_inference_loop(
-            adapter, pending, total, benchmark_name, category,
+            adapter, client, pending, total, benchmark_name, category,
             max_workers, write_lock, completed, id_to_idx, result_file,
         )
     finally:
@@ -134,6 +134,7 @@ def run_infer(
 
 def _run_inference_loop(
     adapter: InferAdapter,
+    client: OpenAIClient,
     pending: list[dict],
     total: int,
     benchmark_name: str,
@@ -153,7 +154,7 @@ def _run_inference_loop(
                 entry = next(pending_iter)
             except StopIteration:
                 break
-            future = pool.submit(_run_single_entry_safe, adapter, entry)
+            future = pool.submit(_run_single_entry_safe, adapter, entry, client)
             in_flight[future] = str(entry.get("id", ""))
 
         while in_flight:
@@ -182,7 +183,7 @@ def _run_inference_loop(
                     entry = next(pending_iter)
                 except StopIteration:
                     break
-                future = pool.submit(_run_single_entry_safe, adapter, entry)
+                future = pool.submit(_run_single_entry_safe, adapter, entry, client)
                 in_flight[future] = str(entry.get("id", ""))
 
 

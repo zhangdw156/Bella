@@ -23,7 +23,6 @@ dependencies = [
 bella-run = "bella.infer.runner:main"
 bella-eval = "bella.eval.runner:main"
 bella-demo = "scripts.run_demo:main"
-bella-full-eval = "scripts.run_full_eval:main"
 # Legacy aliases
 bella-run-bfcl-infer = "bella.infer.runner:main"
 bella-run-bfcl-eval = "bella.eval.runner:main"

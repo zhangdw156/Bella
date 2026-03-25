@@ -6,6 +6,7 @@ package also triggers per-category adapter registration.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -14,6 +15,24 @@ from bella.benchmarks.base import Benchmark, InferAdapter
 
 # Import adapters to trigger @register_adapter decorators
 import bella.benchmarks.bfcl.adapters  # noqa: F401
+
+
+def _refresh_bfcl_paths() -> None:
+    """Force bfcl_eval to re-read BFCL_PROJECT_ROOT from the current environment.
+
+    ``bfcl_eval.constants.eval_config`` computes ``RESULT_PATH`` / ``SCORE_PATH``
+    at **import time** and caches them as module globals.  When we switch
+    ``BFCL_PROJECT_ROOT`` between runs (e.g. none → mem0), the cached values
+    become stale.  This helper patches them in-place.
+    """
+    import bfcl_eval.constants.eval_config as ec
+
+    project_root = Path(os.environ.get("BFCL_PROJECT_ROOT", str(ec.PROJECT_ROOT)))
+    ec.PROJECT_ROOT = project_root
+    ec.RESULT_PATH = project_root / "result"
+    ec.SCORE_PATH = project_root / "score"
+    ec.RESULT_PATH.mkdir(parents=True, exist_ok=True)
+    ec.SCORE_PATH.mkdir(parents=True, exist_ok=True)
 
 
 @register_benchmark("bfcl")
@@ -42,6 +61,8 @@ class BFCLBenchmark(Benchmark):
     def result_file(self, category: str) -> Path:
         from bella.config import load_settings
         from bella.infer.writer import result_file_path
+
+        _refresh_bfcl_paths()
         from bfcl_eval.constants.eval_config import RESULT_PATH
 
         settings = load_settings()
@@ -59,13 +80,14 @@ class BFCLBenchmark(Benchmark):
         from bella.config import load_settings
         from bella.benchmarks.bfcl.compat import ensure_bfcl_model_alias
 
-        partial_eval: bool = kwargs.get("partial_eval", True)
-        settings = load_settings()
-        ensure_bfcl_model_alias(settings.bfcl_registry_name)
-
+        _refresh_bfcl_paths()
         from bfcl_eval.constants.eval_config import SCORE_PATH
         from bfcl_eval.eval_checker import eval_runner
         from bfcl_eval.utils import find_file_by_category
+
+        partial_eval: bool = kwargs.get("partial_eval", True)
+        settings = load_settings()
+        ensure_bfcl_model_alias(settings.bfcl_registry_name)
 
         isolated_score_dir = (
             Path(SCORE_PATH)
