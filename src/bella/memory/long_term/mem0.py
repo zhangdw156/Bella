@@ -1,37 +1,33 @@
 """
-Self-contained mem0-style memory plugin with global disk persistence.
+Self-contained mem0-style memory plugin with session lifecycle and thread safety.
 
-Implements the core mem0 workflow — LLM fact extraction + embedding + cosine
-retrieval — using only the OpenAI SDK already in the project.
+Lifecycle (managed by runner → adapter → plugin):
+  open(session_id)  — create a fresh, isolated store for this benchmark run
+  inference loop    — concurrent workers share the same store (thread-safe)
+  close()           — destroy the store and delete the JSONL file
 
-Memory is **global and persistent**: all BFCL entries within a run (and across
-runs) share the same store on disk.  As the system processes more entries it
-accumulates experience, making later tool-call decisions better informed.
-
-Storage format:
-  JSONL file  (one JSON object per line: {"text": "...", "embedding": [...]})
-  loaded into RAM on startup; new entries are appended and flushed immediately.
-
-Search is numpy-accelerated (vectorised cosine similarity).
+Different benchmark runs get different session_ids
+(e.g. ``"bfcl/multi_turn_base"`` vs ``"locomo/qa"``), so concurrent
+benchmarks are fully isolated.
 
 Environment variables (all optional):
-  BELLA_MEM0_STORE_PATH         – Path to the JSONL store file
-                                  (default: <project>/outputs/mem0/store.jsonl)
+  BELLA_MEM0_STORE_DIR          – Base directory for stores
+                                  (default: <project>/outputs/mem0)
   BELLA_MEM0_API_KEY            – OpenAI key (fallback: OPENAI_API_KEY)
   BELLA_MEM0_BASE_URL           – Custom base URL (fallback: OPENAI_BASE_URL)
   BELLA_MEM0_LLM_MODEL          – LLM for fact extraction (default: gpt-4o-mini)
   BELLA_MEM0_EMBEDDER_MODEL     – Embedding model (default: text-embedding-3-small)
   BELLA_MEM0_MAX_RESULTS         – Top-k retrieval limit (default: 5)
   BELLA_MEM0_MAX_CHARS_PER_ITEM  – Truncation limit per tool output (default: 800)
-  BELLA_MEM0_EXTRACT_FACTS       – true/false; false skips LLM extraction and
-                                   embeds raw text directly (default: true)
+  BELLA_MEM0_EXTRACT_FACTS       – true/false; false embeds raw text (default: true)
 """
 from __future__ import annotations
 
-import atexit
 import json
 import logging
 import os
+import shutil
+import threading
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -57,7 +53,6 @@ Rules:
 
 
 def _find_project_root() -> Path:
-    """Walk up from this file to find the directory containing pyproject.toml."""
     current = Path(__file__).resolve()
     for parent in current.parents:
         if (parent / "pyproject.toml").exists():
@@ -65,28 +60,26 @@ def _find_project_root() -> Path:
     return Path.cwd()
 
 
-# ── persistent vector store (JSONL + numpy) ──────────────────────────
+# ── thread-safe persistent vector store ──────────────────────────────
 
 class _VectorStore:
-    """Global, disk-persisted vector store with numpy-accelerated search.
+    """Thread-safe, disk-persisted vector store with numpy-accelerated search.
 
-    Data lives in a single JSONL file.  On init the file is loaded into RAM;
-    every ``add()`` appends one line and flushes.  Search converts the
-    embedding list to a numpy matrix lazily (only when dirty) so that
-    repeated adds between searches are cheap.
+    All public methods are protected by an ``RLock`` so that concurrent
+    ``add`` / ``search`` calls from the thread-pool are safe.
     """
 
     def __init__(self, store_path: str) -> None:
+        self._lock = threading.RLock()
         self._texts: List[str] = []
         self._emb_list: List[List[float]] = []
         self._emb_np: np.ndarray | None = None
         self._dirty = True
-
         self._store_path = store_path
+
         os.makedirs(os.path.dirname(os.path.abspath(store_path)), exist_ok=True)
         self._load_from_disk()
         self._file = open(store_path, "a", encoding="utf-8")  # noqa: SIM115
-        atexit.register(self.close)
 
     def _load_from_disk(self) -> None:
         if not os.path.exists(self._store_path):
@@ -105,24 +98,16 @@ class _VectorStore:
                 except (json.JSONDecodeError, KeyError):
                     continue
         if count:
-            logger.info(
-                "mem0 store: loaded %d memories from %s", count, self._store_path
-            )
-
-    def close(self) -> None:
-        if hasattr(self, "_file") and self._file and not self._file.closed:
-            self._file.close()
+            logger.info("mem0 store: loaded %d memories from %s", count, self._store_path)
 
     def add(self, text: str, embedding: List[float]) -> None:
-        self._texts.append(text)
-        self._emb_list.append(embedding)
-        self._dirty = True
-
-        record = json.dumps(
-            {"text": text, "embedding": embedding}, ensure_ascii=False
-        )
-        self._file.write(record + "\n")
-        self._file.flush()
+        with self._lock:
+            self._texts.append(text)
+            self._emb_list.append(embedding)
+            self._dirty = True
+            record = json.dumps({"text": text, "embedding": embedding}, ensure_ascii=False)
+            self._file.write(record + "\n")
+            self._file.flush()
 
     def _rebuild_np(self) -> None:
         if self._emb_list:
@@ -132,37 +117,55 @@ class _VectorStore:
         self._dirty = False
 
     def search(self, query_embedding: List[float], limit: int) -> List[str]:
-        if not self._texts:
-            return []
-        if self._dirty:
-            self._rebuild_np()
-        if self._emb_np is None:
-            return []
+        with self._lock:
+            if not self._texts:
+                return []
+            if self._dirty:
+                self._rebuild_np()
+            if self._emb_np is None:
+                return []
 
-        query = np.array(query_embedding, dtype=np.float32)
-        query_norm = np.linalg.norm(query)
-        if query_norm < 1e-10:
-            return []
+            query = np.array(query_embedding, dtype=np.float32)
+            query_norm = np.linalg.norm(query)
+            if query_norm < 1e-10:
+                return []
 
-        scores = self._emb_np @ query
-        norms = np.linalg.norm(self._emb_np, axis=1)
-        scores = scores / (norms * query_norm + 1e-10)
+            scores = self._emb_np @ query
+            norms = np.linalg.norm(self._emb_np, axis=1)
+            scores = scores / (norms * query_norm + 1e-10)
 
-        top_k = min(limit, len(self._texts))
-        top_indices = np.argpartition(scores, -top_k)[-top_k:]
-        top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
+            top_k = min(limit, len(self._texts))
+            top_indices = np.argpartition(scores, -top_k)[-top_k:]
+            top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
+            return [self._texts[i] for i in top_indices]
 
-        return [self._texts[i] for i in top_indices]
+    def close(self) -> None:
+        with self._lock:
+            if hasattr(self, "_file") and self._file and not self._file.closed:
+                self._file.close()
+
+    def destroy(self) -> None:
+        """Close the file and delete the store directory."""
+        self.close()
+        store_dir = os.path.dirname(os.path.abspath(self._store_path))
+        if os.path.isdir(store_dir):
+            shutil.rmtree(store_dir, ignore_errors=True)
 
     def __len__(self) -> int:
-        return len(self._texts)
+        with self._lock:
+            return len(self._texts)
 
 
 # ── plugin ───────────────────────────────────────────────────────────
 
 @register_memory("mem0")
 class Mem0MemoryPlugin(MemoryPlugin):
-    """Global mem0-style memory: LLM fact extraction + vector search + JSONL persistence."""
+    """Mem0-style memory with session lifecycle and thread-safe shared store.
+
+    The store is **not** created at ``__init__`` time — it is created on
+    ``open(session_id)`` and destroyed on ``close()``.  Between open/close,
+    all concurrent inference threads share the same store safely.
+    """
 
     def __init__(self) -> None:
         self.max_results: int = int(os.getenv("BELLA_MEM0_MAX_RESULTS", "5"))
@@ -174,42 +177,50 @@ class Mem0MemoryPlugin(MemoryPlugin):
             not in ("0", "false", "no")
         )
 
-        api_key = (
-            os.getenv("BELLA_MEM0_API_KEY")
-            or os.getenv("OPENAI_API_KEY")
-            or None
-        )
-        base_url = (
-            os.getenv("BELLA_MEM0_BASE_URL")
-            or os.getenv("OPENAI_BASE_URL")
-            or None
-        )
+        api_key = os.getenv("BELLA_MEM0_API_KEY") or os.getenv("OPENAI_API_KEY") or None
+        base_url = os.getenv("BELLA_MEM0_BASE_URL") or os.getenv("OPENAI_BASE_URL") or None
         self._llm_model: str = os.getenv("BELLA_MEM0_LLM_MODEL", "gpt-4o-mini")
-        self._embedder_model: str = os.getenv(
-            "BELLA_MEM0_EMBEDDER_MODEL", "text-embedding-3-small"
-        )
-
+        self._embedder_model: str = os.getenv("BELLA_MEM0_EMBEDDER_MODEL", "text-embedding-3-small")
         self._client = OpenAI(api_key=api_key, base_url=base_url)
 
-        store_path = os.getenv("BELLA_MEM0_STORE_PATH") or str(
-            _find_project_root() / "outputs" / "mem0" / "store.jsonl"
+        self._store_dir = os.getenv("BELLA_MEM0_STORE_DIR") or str(
+            _find_project_root() / "outputs" / "mem0"
         )
+        self._store: _VectorStore | None = None
+        self._session_id: str | None = None
+
+    # ── lifecycle ────────────────────────────────────────────────────
+
+    def open(self, session_id: str) -> None:
+        if self._store is not None:
+            self.close()
+        self._session_id = session_id
+        safe_name = session_id.replace("/", "_").replace("\\", "_")
+        store_path = os.path.join(self._store_dir, safe_name, "store.jsonl")
         self._store = _VectorStore(store_path)
         logger.info(
-            "mem0 plugin ready  (store=%s, existing=%d, extract_facts=%s)",
-            store_path,
-            len(self._store),
-            self._extract_facts,
+            "mem0 opened  session=%r  store=%s  extract_facts=%s",
+            session_id, store_path, self._extract_facts,
         )
 
+    def close(self) -> None:
+        if self._store is not None:
+            count = len(self._store)
+            self._store.destroy()
+            self._store = None
+            logger.info(
+                "mem0 closed  session=%r  memories_cleared=%d",
+                self._session_id, count,
+            )
+            self._session_id = None
+
+    # ── internal helpers ─────────────────────────────────────────────
+
     def _embed(self, text: str) -> List[float]:
-        resp = self._client.embeddings.create(
-            model=self._embedder_model, input=text
-        )
+        resp = self._client.embeddings.create(model=self._embedder_model, input=text)
         return resp.data[0].embedding
 
     def _extract(self, text: str) -> List[str]:
-        """Use LLM to distil raw tool output into concise factual sentences."""
         resp = self._client.chat.completions.create(
             model=self._llm_model,
             messages=[
@@ -228,6 +239,8 @@ class Mem0MemoryPlugin(MemoryPlugin):
             return []
         return facts
 
+    # ── MemoryPlugin protocol ────────────────────────────────────────
+
     def init_state(self, conversation: Dict[str, Any]) -> None:
         pass
 
@@ -238,9 +251,10 @@ class Mem0MemoryPlugin(MemoryPlugin):
         tool_call: str,
         tool_result_raw: str,
     ) -> None:
+        if self._store is None:
+            return
         truncated = truncate_tool_output(tool_result_raw, self.max_chars_per_item)
         raw_text = f"Called {tool_call}. Result: {truncated}"
-
         try:
             facts = self._extract(raw_text) if self._extract_facts else []
             if not facts:
@@ -258,7 +272,7 @@ class Mem0MemoryPlugin(MemoryPlugin):
         turn_index: int,
     ) -> Dict[str, str]:
         empty = {"action_history_section": "", "tool_result_memory_section": ""}
-        if turn_index == 0 and len(self._store) == 0:
+        if self._store is None or (turn_index == 0 and len(self._store) == 0):
             return empty
 
         conversation = state["conversation"]

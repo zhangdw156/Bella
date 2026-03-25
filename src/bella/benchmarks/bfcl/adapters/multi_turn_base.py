@@ -81,6 +81,12 @@ class MultiTurnBaseAdapter(BFCLAdapter):
         )
         self.env_model_name: str = os.getenv("BELLA_MULTI_TURN_ENV_MODEL_NAME", "bella")
 
+    def on_run_start(self, session_id: str) -> None:
+        self.memory_plugin.open(session_id)
+
+    def on_run_end(self) -> None:
+        self.memory_plugin.close()
+
     def init_state(self, entry: Dict[str, Any]) -> Dict[str, Any]:
         question = entry.get("question", [])
         ground_truth = entry.get("ground_truth", [])

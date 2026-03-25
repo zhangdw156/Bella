@@ -38,6 +38,19 @@ class InferAdapter(ABC):
     ) -> BellaResult:
         """Parse model response, update state, return intermediate result."""
 
+    def on_run_start(self, session_id: str) -> None:
+        """Called once before the inference loop.
+
+        *session_id* identifies this run (e.g. ``"bfcl/multi_turn_base"``).
+        Adapters with long-term memory should forward to ``memory_plugin.open()``.
+        """
+
+    def on_run_end(self) -> None:
+        """Called once after the inference loop (including on error).
+
+        Adapters with long-term memory should forward to ``memory_plugin.close()``.
+        """
+
     def init_state(self, entry: Dict[str, Any]) -> Dict[str, Any]:
         """Initialise per-entry state (default: empty dict)."""
         return {}

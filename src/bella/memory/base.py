@@ -1,9 +1,12 @@
 """
 Memory plugin base classes.
 
-* ``MemoryPlugin``  – abstract base for all plugins (short-term & long-term).
-* ``NoOpMemory``    – concrete no-op fallback.
+* ``MemoryPlugin``    – abstract base for all plugins (short-term & long-term).
+* ``NoOpMemory``      – concrete no-op fallback.
 * ``MemoryComposite`` – composes multiple plugins, merging their prompt blocks.
+
+Lifecycle (managed by the runner via adapter hooks):
+  open(session_id)  →  inference loop  →  close()
 """
 from __future__ import annotations
 
@@ -14,10 +17,20 @@ from typing import Any, Dict, List
 class MemoryPlugin(ABC):
     """Abstract base for multi-turn memory plugins.
 
-    Plugins operate only on conversation state (read/write); they do not touch
-    execution state.  The adapter syncs execution → conversation and calls
-    plugin hooks; plugins produce prompt blocks for injection.
+    Lifecycle methods ``open`` / ``close`` bracket a benchmark run.
+    Short-term plugins can ignore them (defaults are no-ops).  Long-term
+    plugins should create / destroy their stores in these hooks.
     """
+
+    def open(self, session_id: str) -> None:
+        """Called once before inference starts.
+
+        *session_id* identifies this benchmark run (e.g. ``"bfcl/multi_turn_base"``).
+        Long-term plugins use it to create an isolated, fresh store.
+        """
+
+    def close(self) -> None:
+        """Called once after inference ends.  Should release resources and clear memory."""
 
     @abstractmethod
     def init_state(self, conversation: Dict[str, Any]) -> None:
@@ -40,10 +53,7 @@ class MemoryPlugin(ABC):
         state: Dict[str, Any],
         turn_index: int,
     ) -> Dict[str, str]:
-        """Return ``{placeholder_name: content}`` for user-prompt injection.
-
-        Standard keys: ``action_history_section``, ``tool_result_memory_section``.
-        """
+        """Return ``{placeholder_name: content}`` for user-prompt injection."""
 
 
 class NoOpMemory(MemoryPlugin):
@@ -76,13 +86,20 @@ class NoOpMemory(MemoryPlugin):
 class MemoryComposite(MemoryPlugin):
     """Composes multiple ``MemoryPlugin`` instances.
 
-    * ``init_state`` / ``on_tool_result`` — delegates to every child.
-    * ``build_prompt_blocks`` — merges outputs by concatenating values per key
-      (so short-term + long-term blocks can coexist in the same prompt).
+    All lifecycle and per-entry methods are delegated to every child plugin.
+    ``build_prompt_blocks`` merges outputs by concatenating values per key.
     """
 
     def __init__(self, plugins: List[MemoryPlugin]) -> None:
         self._plugins = list(plugins)
+
+    def open(self, session_id: str) -> None:
+        for p in self._plugins:
+            p.open(session_id)
+
+    def close(self) -> None:
+        for p in self._plugins:
+            p.close()
 
     def init_state(self, conversation: Dict[str, Any]) -> None:
         for p in self._plugins:

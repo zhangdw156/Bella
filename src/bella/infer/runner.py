@@ -113,10 +113,37 @@ def run_infer(
         )
         return
 
+    session_id = f"{benchmark_name}/{category}"
+    adapter.on_run_start(session_id)
+
     write_lock = Lock()
     completed = skipped
     id_to_idx = {str(e.get("id", "")): i for i, e in enumerate(selected, 1)}
 
+    try:
+        _run_inference_loop(
+            adapter, pending, total, benchmark_name, category,
+            max_workers, write_lock, completed, id_to_idx, result_file,
+        )
+    finally:
+        adapter.on_run_end()
+
+    print(f"[Bella] Inference done: {benchmark_name}/{category} limit={limit}")
+    print(f"[Bella] Result file: {result_file}")
+
+
+def _run_inference_loop(
+    adapter: InferAdapter,
+    pending: list[dict],
+    total: int,
+    benchmark_name: str,
+    category: str,
+    max_workers: int,
+    write_lock: Lock,
+    completed: int,
+    id_to_idx: dict[str, int],
+    result_file,
+) -> None:
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         in_flight: dict[Future[BellaResult], str] = {}
         pending_iter = iter(pending)
@@ -157,9 +184,6 @@ def run_infer(
                     break
                 future = pool.submit(_run_single_entry_safe, adapter, entry)
                 in_flight[future] = str(entry.get("id", ""))
-
-    print(f"[Bella] Inference done: {benchmark_name}/{category} limit={limit}")
-    print(f"[Bella] Result file: {result_file}")
 
 
 # ── backward-compatible wrapper ──────────────────────────────────────
