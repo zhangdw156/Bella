@@ -49,3 +49,6 @@ opencode.json
 workspace/
 
 logs/
+
+# Evaluation artifacts
+artifacts/
