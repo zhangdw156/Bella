@@ -29,6 +29,12 @@ class ToolResultMemoryV2Plugin(MemoryPlugin):
     def init_state(self, conversation: Dict[str, Any]) -> None:
         conversation["tool_result_memory_items"] = []
 
+    def add(self, content: str, metadata: Dict[str, Any] | None = None) -> None:
+        pass
+
+    def search(self, query: str, limit: int = 5) -> List[str]:
+        return []
+
     def on_tool_result(
         self,
         conversation: Dict[str, Any],

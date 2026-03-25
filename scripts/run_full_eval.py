@@ -4,7 +4,7 @@ Full evaluation matrix: (memory_mode × benchmark × category).
 
 For the model configured in .env, runs inference + evaluation for:
   - BFCL multi-turn (4 categories) × {none, mem0}
-  - LoCoMo QA × {none}  (memory plugin does not apply to LoCoMo QA)
+  - LoCoMo QA × {none, mem0}  (mem0 ingests conversation into memory, retrieves per question)
 
 Intermediate results  → outputs/
 Score summaries       → artifacts/
@@ -126,7 +126,7 @@ def _run_one(
 def _extract_score(benchmark: str, category: str, memory_mode: str) -> str:
     """Best-effort score extraction after evaluation."""
     if benchmark == "locomo":
-        score_file = ROOT_DIR / "outputs" / "locomo" / "scores" / f"locomo_{category}_score.json"
+        score_file = ROOT_DIR / "outputs" / "locomo" / memory_mode / "scores" / f"locomo_{category}_score.json"
         if score_file.exists():
             data = json.loads(score_file.read_text(encoding="utf-8"))
             return str(data.get("overall", ""))
@@ -205,9 +205,10 @@ def main() -> None:
                 rows.append(row)
 
     if run_locomo:
-        for category in LOCOMO_CATEGORIES:
-            row = _run_one("locomo", category, "none", args.max_workers)
-            rows.append(row)
+        for memory_mode in MEMORY_MODES:
+            for category in LOCOMO_CATEGORIES:
+                row = _run_one("locomo", category, memory_mode, args.max_workers)
+                rows.append(row)
 
     artifacts_dir = ROOT_DIR / "artifacts"
     _write_summary(rows, artifacts_dir)

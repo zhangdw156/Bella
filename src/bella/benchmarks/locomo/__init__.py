@@ -123,12 +123,20 @@ class LoCoMoBenchmark(Benchmark):
         return entries
 
     def create_adapter(self, category: str) -> InferAdapter:
+        memory_mode = os.getenv("BELLA_MULTI_TURN_MEMORY_MODE", "none").strip().lower()
+        if memory_mode not in ("none", ""):
+            from bella.benchmarks.locomo.adapter import LoCoMoMemoryAdapter
+            return LoCoMoMemoryAdapter()
         from bella.benchmarks.locomo.adapter import LoCoMoQAAdapter
         return LoCoMoQAAdapter()
 
+    def _memory_mode(self) -> str:
+        return os.getenv("BELLA_MULTI_TURN_MEMORY_MODE", "none").strip().lower() or "none"
+
     def result_file(self, category: str) -> Path:
         root = _find_project_root()
-        out_dir = root / "outputs" / "locomo" / "results"
+        mode = self._memory_mode()
+        out_dir = root / "outputs" / "locomo" / mode / "results"
         out_dir.mkdir(parents=True, exist_ok=True)
         return out_dir / f"locomo_{category}_result.jsonl"
 
