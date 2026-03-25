@@ -20,6 +20,10 @@ dependencies = [
 ]
 
 [project.scripts]
-bella-run-bfcl-infer = "bella.infer.bfcl_runner:main"
-bella-run-bfcl-eval = "bella.eval.bfcl_eval:main"
+bella-run = "bella.infer.runner:main"
+bella-eval = "bella.eval.runner:main"
+bella-demo = "scripts.run_demo:main"
+# Legacy aliases
+bella-run-bfcl-infer = "bella.infer.runner:main"
+bella-run-bfcl-eval = "bella.eval.runner:main"
 bella-run-bfcl-demo = "scripts.run_demo:main"
