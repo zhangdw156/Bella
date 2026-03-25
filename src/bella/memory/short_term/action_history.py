@@ -1,14 +1,19 @@
 """
-Action history plugin: injects previous turns' function calls (from conversation.history_calls).
-Reads only conversation; does not touch execution.
+Action history plugin: injects previous turns' function calls
+(from conversation.history_calls).  Reads only conversation; does not
+touch execution.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from bella.memory.base import MemoryPlugin
+from bella.memory.registry import register_memory
 
-class ActionHistoryPlugin:
-    """Builds action_history_section from conversation["history_calls"] (set by adapter from execution)."""
+
+@register_memory("action_history")
+class ActionHistoryPlugin(MemoryPlugin):
+    """Builds ``action_history_section`` from ``conversation["history_calls"]``."""
 
     def init_state(self, conversation: Dict[str, Any]) -> None:
         pass

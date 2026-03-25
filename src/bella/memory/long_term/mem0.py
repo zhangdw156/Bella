@@ -38,7 +38,9 @@ from typing import Any, Dict, List
 import numpy as np
 from openai import OpenAI
 
+from bella.memory.base import MemoryPlugin
 from bella.memory.observation import truncate_tool_output
+from bella.memory.registry import register_memory
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +88,6 @@ class _VectorStore:
         self._file = open(store_path, "a", encoding="utf-8")  # noqa: SIM115
         atexit.register(self.close)
 
-    # ── disk I/O ─────────────────────────────────────────────────────
-
     def _load_from_disk(self) -> None:
         if not os.path.exists(self._store_path):
             return
@@ -112,8 +112,6 @@ class _VectorStore:
     def close(self) -> None:
         if hasattr(self, "_file") and self._file and not self._file.closed:
             self._file.close()
-
-    # ── read / write ─────────────────────────────────────────────────
 
     def add(self, text: str, embedding: List[float]) -> None:
         self._texts.append(text)
@@ -151,7 +149,6 @@ class _VectorStore:
         scores = scores / (norms * query_norm + 1e-10)
 
         top_k = min(limit, len(self._texts))
-        # argpartition is O(n) vs O(n log n) for full sort
         top_indices = np.argpartition(scores, -top_k)[-top_k:]
         top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
 
@@ -163,7 +160,8 @@ class _VectorStore:
 
 # ── plugin ───────────────────────────────────────────────────────────
 
-class Mem0MemoryPlugin:
+@register_memory("mem0")
+class Mem0MemoryPlugin(MemoryPlugin):
     """Global mem0-style memory: LLM fact extraction + vector search + JSONL persistence."""
 
     def __init__(self) -> None:
@@ -204,8 +202,6 @@ class Mem0MemoryPlugin:
             self._extract_facts,
         )
 
-    # ── internal helpers ─────────────────────────────────────────────
-
     def _embed(self, text: str) -> List[float]:
         resp = self._client.embeddings.create(
             model=self._embedder_model, input=text
@@ -231,8 +227,6 @@ class Mem0MemoryPlugin:
         if not facts or any("no notable" in f.lower() for f in facts):
             return []
         return facts
-
-    # ── MemoryPlugin protocol ────────────────────────────────────────
 
     def init_state(self, conversation: Dict[str, Any]) -> None:
         pass

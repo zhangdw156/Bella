@@ -1,17 +1,21 @@
 """
-Tool result memory plugin: stores raw (truncated) tool results in conversation,
-injects "Turn t | call -> result" block. Operates only on conversation.
+Tool result memory v2 plugin: stores factual observations (verbalized)
+in conversation, injects "Turn t | call => observation" block.
+Operates only on conversation.
 """
 from __future__ import annotations
 
 import os
 from typing import Any, Dict, List
 
-from bella.memory.observation import truncate_tool_output
+from bella.memory.base import MemoryPlugin
+from bella.memory.observation import observation_from_tool_result, truncate_tool_output
+from bella.memory.registry import register_memory
 
 
-class ToolResultMemoryPlugin:
-    """Writes to conversation["tool_result_memory_items"]; builds block with " -> " separator."""
+@register_memory("tool_result_memory_v2")
+class ToolResultMemoryV2Plugin(MemoryPlugin):
+    """Writes to ``conversation["tool_result_memory_items"]`` with observation text; builds block with ``=>``."""
 
     def __init__(self) -> None:
         self.max_chars_per_item: int = int(
@@ -32,12 +36,14 @@ class ToolResultMemoryPlugin:
         tool_call: str,
         tool_result_raw: str,
     ) -> None:
+        truncated = truncate_tool_output(tool_result_raw, self.max_chars_per_item)
+        observation = observation_from_tool_result(tool_call, truncated)
         items: List[Dict[str, Any]] = conversation.get("tool_result_memory_items", [])
         items.append(
             {
                 "turn": turn_index,
                 "tool_call": tool_call,
-                "tool_result": truncate_tool_output(tool_result_raw, self.max_chars_per_item),
+                "tool_result": observation,
             }
         )
         conversation["tool_result_memory_items"] = items
@@ -56,7 +62,7 @@ class ToolResultMemoryPlugin:
             t = it.get("turn", "?")
             call = str(it.get("tool_call", ""))
             result = str(it.get("tool_result", ""))
-            lines.append(f"- Turn {t} | {call} -> {result}")
+            lines.append(f"- Turn {t} | {call} => {result}")
         if self.max_total_chars > 0:
             while lines and len("\n".join(lines)) > self.max_total_chars:
                 lines.pop(0)
@@ -74,7 +80,7 @@ class ToolResultMemoryPlugin:
             memory_block = self._build_block(conversation, turn_index)
             if memory_block:
                 tool_result_memory_section = (
-                    "\nTool result memory so far (focus on results):\n"
+                    "\nTool result observations so far:\n"
                     + memory_block
                     + "\n"
                 )
@@ -84,5 +90,5 @@ class ToolResultMemoryPlugin:
         }
 
     def debug_tool_memory_inner(self, state: Dict[str, Any], turn_index: int) -> str:
-        """Same inner lines as legacy _build_tool_result_memory_block (no header); for debug parity."""
+        """Same inner lines as legacy ``_build_tool_result_memory_block``; for debug parity."""
         return self._build_block(state["conversation"], turn_index)
