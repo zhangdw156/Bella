@@ -81,7 +81,7 @@ class BFCLBenchmark(Benchmark):
         from bella.benchmarks.bfcl.compat import ensure_bfcl_model_alias
 
         _refresh_bfcl_paths()
-        from bfcl_eval.constants.eval_config import SCORE_PATH
+        import bfcl_eval.constants.eval_config as ec
         from bfcl_eval.eval_checker import eval_runner
         from bfcl_eval.utils import find_file_by_category
 
@@ -90,17 +90,25 @@ class BFCLBenchmark(Benchmark):
         ensure_bfcl_model_alias(settings.bfcl_registry_name)
 
         isolated_score_dir = (
-            Path(SCORE_PATH)
+            Path(ec.SCORE_PATH)
             / "__bella_isolated_eval__"
             / settings.bfcl_registry_name.replace("/", "_")
         )
         isolated_score_dir.mkdir(parents=True, exist_ok=True)
 
+        # ``eval_runner`` binds ``RESULT_PATH`` at import time.  After switching
+        # ``BFCL_PROJECT_ROOT`` (e.g. none → mem0), the default ``result_dir=None``
+        # still points at the *first* project root, so no model subdir matches
+        # and the leaderboard CSV stays empty.  Pass absolute paths from the
+        # freshly patched ``eval_config`` instead.
+        result_root = ec.RESULT_PATH.resolve()
+        score_root = isolated_score_dir.resolve()
+
         eval_runner.main(
             model=[settings.bfcl_registry_name],
             test_categories=[category],
-            result_dir=None,
-            score_dir=isolated_score_dir,
+            result_dir=result_root,
+            score_dir=score_root,
             partial_eval=partial_eval,
         )
 

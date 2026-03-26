@@ -162,7 +162,12 @@ class Mem0MemoryPlugin(MemoryPlugin):
 
         api_key = os.getenv("BELLA_MEM0_API_KEY") or os.getenv("OPENAI_API_KEY") or None
         base_url = os.getenv("BELLA_MEM0_BASE_URL") or os.getenv("OPENAI_BASE_URL") or None
-        self._llm_model: str = os.getenv("BELLA_MEM0_LLM_MODEL", "gpt-4o-mini")
+        # Default fact-extraction model follows OPENAI_MODEL so compatible gateways
+        # that do not expose ``gpt-4o-mini`` still work without extra env vars.
+        self._llm_model: str = (
+            os.getenv("BELLA_MEM0_LLM_MODEL", "").strip()
+            or os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+        )
         self._embedder_model: str = os.getenv("BELLA_MEM0_EMBEDDER_MODEL", "text-embedding-3-small")
         self._client = OpenAI(api_key=api_key, base_url=base_url)
 

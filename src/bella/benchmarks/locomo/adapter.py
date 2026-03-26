@@ -190,6 +190,11 @@ class LoCoMoMemoryAdapter(InferAdapter):
         self._ingested: set[str] = set()
         self._ingest_lock = threading.Lock()
         self._max_memories = int(os.getenv("BELLA_MEM0_MAX_RESULTS", "10"))
+        # Match ``LoCoMoQAAdapter``: when retrieval returns nothing, fall back to
+        # the same full-context budget (default 0 = no truncation).
+        self._max_context_chars = int(
+            os.getenv("BELLA_LOCOMO_MAX_CONTEXT_CHARS", "0")
+        )
 
     def on_run_start(self, session_id: str) -> None:
         self._memory.open(session_id)
@@ -244,7 +249,7 @@ class LoCoMoMemoryAdapter(InferAdapter):
             conversation = entry["conversation"]
             speaker_a, speaker_b = _get_speakers(conversation)
             header = CONV_HEADER.format(speaker_a=speaker_a, speaker_b=speaker_b)
-            context = _format_conversation(conversation, max_chars=8000)
+            context = _format_conversation(conversation, self._max_context_chars)
             qa_prompt = QA_PROMPT.format(question=question)
             user_content = header + context + "\n\n" + qa_prompt
 
