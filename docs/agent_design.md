@@ -15,15 +15,15 @@ Both inherit from a common `BaseAgent` abstract class (inheritance-based design,
 
 ```
 Data Layer:
-  Message(role, content, tool_calls, reasoning, token_usage)
-  ToolCall(name, arguments, id, result)
+  Message(role, content, tool_calls, reasoning_content, token_usage)
+  ToolCall(name, arguments, id)
   TokenUsage(input_tokens, output_tokens)
   Timing(start_time, end_time)
 
 Memory Layer:
   Step (base)
   ├── UserStep(content)
-  ├── AssistantStep(content, tool_calls, reasoning)
+  ├── AssistantStep(content, tool_calls, reasoning_content)
   └── ToolResultStep(tool_call_id, name, result)
 
   Turn:
@@ -46,7 +46,7 @@ Agent Layer:
   └── UserAgent
 
 Result Layer:
-  TurnResult(assistant_message, tool_calls, reasoning, token_usage, timing)
+  TurnResult(assistant_message, tool_calls, reasoning_content, token_usage, timing)
   RunResult(turns, total_tool_calls, token_usage, timing, pass)
 ```
 
@@ -59,10 +59,10 @@ Result Layer:
 ```python
 @dataclass
 class Message:
-    role: str                              # "system" | "user" | "assistant" | "tool"
+    role: Literal["system", "user", "assistant", "tool"]
     content: str | None = None
     tool_calls: list[ToolCall] | None = None
-    reasoning: str | None = None
+    reasoning_content: str | None = None
     token_usage: TokenUsage | None = None
 ```
 
@@ -74,7 +74,6 @@ class ToolCall:
     name: str
     arguments: dict
     id: str                               # SDK-generated call ID
-    result: dict | None = None            # Filled after execution
 ```
 
 ### TokenUsage
@@ -120,7 +119,7 @@ class UserStep:
 class AssistantStep:
     content: str                           # Text response
     tool_calls: list[ToolCall]             # Tool calls made (empty if none)
-    reasoning: str | None = None           # Thinking/reasoning content
+    reasoning_content: str | None = None   # Thinking/reasoning content
     token_usage: TokenUsage | None = None
 
 @dataclass
@@ -153,13 +152,13 @@ class Memory:
         """Reconstruct messages from Steps.
 
         Reasoning visibility rule:
-        - Previous turns (index < current_turn_index): reasoning STRIPPED
-        - Current turn (index == current_turn_index): reasoning INCLUDED
+        - Previous turns (index < current_turn_index): reasoning_content STRIPPED
+        - Current turn (index == current_turn_index): reasoning_content INCLUDED
           via adapter.format_reasoning()
 
         Args:
             current_turn_index: Index of the turn currently being processed.
-            adapter: Used to format reasoning into content when visible.
+            adapter: Used to format reasoning_content into content when visible.
 
         Returns:
             Message list ready for LLM call.
@@ -175,19 +174,19 @@ class Memory:
 
 ```
 Turn 1 (react loop):
-  Step 1: LLM → response (reasoning + content + tool_calls)
-  Step 2: LLM → context includes Step 1's reasoning ✓
-  Step 3: LLM → context includes Step 1 & 2's reasoning ✓
+  Step 1: LLM → response (reasoning_content + content + tool_calls)
+  Step 2: LLM → context includes Step 1's reasoning_content ✓
+  Step 3: LLM → context includes Step 1 & 2's reasoning_content ✓
   → Turn 1 ends
 
 Turn 2 (new user query):
-  Step 1: LLM → Turn 1's reasoning stripped from context ✗
-  Step 2: LLM → context includes Turn 2 Step 1's reasoning ✓
+  Step 1: LLM → Turn 1's reasoning_content stripped from context ✗
+  Step 2: LLM → context includes Turn 2 Step 1's reasoning_content ✓
 ```
 
-Within the same turn's react loop: reasoning is visible (formatted via `adapter.format_reasoning(content, reasoning_content)`).
+Within the same turn's react loop: reasoning_content is visible (formatted via `adapter.format_reasoning(content, reasoning_content)`).
 
-Across turns: reasoning is stripped. Only `content` from previous turns is included.
+Across turns: reasoning_content is stripped. Only `content` from previous turns is included.
 
 ---
 
@@ -237,12 +236,12 @@ class ModelAdapter(Protocol):
         ...
 
     def parse_reasoning(self, response) -> str | None:
-        """Extract reasoning/thinking content from the response."""
+        """Extract reasoning_content from the response."""
         ...
 
     def format_reasoning(self, content: str, reasoning_content: str) -> str:
         """Combine content and reasoning_content into a single string.
-        Used when reasoning needs to be visible in subsequent LLM calls
+        Used when reasoning_content needs to be visible in subsequent LLM calls
         within the same turn.
         """
         ...
@@ -416,7 +415,7 @@ def run_turn(self, user_message: str, tools: list[dict], backend) -> TurnResult:
         response = self._call_llm(messages, tools)
 
         # Parse response
-        reasoning = self.adapter.parse_reasoning(response)
+        reasoning_content = self.adapter.parse_reasoning(response)
         content = self._extract_text(response)
 
         if self.adapter.is_tool_call(response):
@@ -431,13 +430,13 @@ def run_turn(self, user_message: str, tools: list[dict], backend) -> TurnResult:
             # Record in memory
             assistant_step = AssistantStep(
                 content=content,
-                tool_calls=[ToolCall(**tc, result=r.result) for tc, r in zip(parsed_calls, tool_results)],
-                reasoning=reasoning,
+                tool_calls=[ToolCall(**tc) for tc in parsed_calls],
+                reasoning_content=reasoning_content,
             )
             turn.react_steps.append((assistant_step, tool_results))
         else:
             # No tool call — turn complete
-            assistant_step = AssistantStep(content=content, tool_calls=[], reasoning=reasoning)
+            assistant_step = AssistantStep(content=content, tool_calls=[], reasoning_content=reasoning_content)
             turn.react_steps.append((assistant_step, []))
             break
 
@@ -463,7 +462,7 @@ UserAgent uses a simplified memory structure (no tool calls):
 class UserAgentStep:
     received_message: str         # Assistant's response (maps to "user" role in LLM call due to role inversion)
     generated_message: str        # Generated user message (maps to "assistant" role in LLM call)
-    reasoning: str | None = None
+    reasoning_content: str | None = None
     is_done: bool = False
 
 class UserMemory:
@@ -559,7 +558,7 @@ def run_dynamic(case, react_agent, user_agent, tools, backend) -> RunResult:
 class TurnResult:
     assistant_message: str
     tool_calls: list[ToolCall]
-    reasoning: str | None
+    reasoning_content: str | None
     token_usage: TokenUsage | None
     timing: Timing | None
 ```
