@@ -144,30 +144,31 @@ Users may set a different temperature if their model performs better at another 
 
 ## System Prompt
 
-The ReactAgent's system prompt is assembled from two blocks:
+The ReactAgent's system prompt is assembled from two parts:
 
-1. **Common block**: a universal prompt defining the agent's basic behavioral rules (e.g., "You are a helpful assistant that uses tools to complete tasks. Do not fabricate information."). Shared across all cases.
-2. **Category block**: a category-specific prompt containing domain knowledge, business rules, and policies relevant to that category. For example, `tau3_airline` includes the airline's cancellation and refund policies.
+1. **Common block**: hardcoded in ReactAgent source code — universal behavioral rules.
+2. **Category block** (optional): looked up from `category_prompts.json` by the case's `category` field. Contains domain-specific business rules and policies.
 
-The final system prompt is: `common_block + category_block`.
-
-Both blocks are maintained by the benchmark — **users cannot modify or override them**. This ensures fair comparison across models.
-
-Prompt files are stored in the repository:
+`category_prompts.json` is a top-level file alongside `environments/` and `cases/`:
 
 ```
-prompts/
-├── common.md                         # Universal agent instructions
-├── bfclv4_multi_base.md
-├── bfclv4_multi_miss_func.md
-├── bfclv4_multi_miss_param.md
-├── bfclv4_multi_long_context.md
-├── mcpmark_filesystem.md
-├── mcpmark_postgres.md
-├── tau3_airline.md
-├── tau3_retail.md
-└── astra_{env_name}.md
+bella/
+├── environments/
+├── cases/
+└── category_prompts.json
 ```
+
+Format:
+
+```json
+{
+  "tau3_airline": "The current time is 2024-05-15 ...\n\nAs an airline agent ...",
+  "tau3_retail": "...",
+  "bfclv4_multi_base": null
+}
+```
+
+Categories with `null` or absent entries use only the common block. Users cannot modify or override system prompts — this ensures fair comparison across models.
 
 ## Metrics
 

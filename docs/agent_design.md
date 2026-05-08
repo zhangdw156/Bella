@@ -50,14 +50,14 @@ The agent that evaluates the model under test. Receives a `ModelAdapter` via com
 
 ### System Prompt Assembly
 
-The ReactAgent's system prompt is assembled from two blocks at runtime:
+The ReactAgent's system prompt is assembled from two parts at runtime:
 
-1. **Common block** (`prompts/common.md`): universal agent behavioral rules, shared across all cases.
-2. **Category block** (`prompts/{category}.md`): domain-specific business rules and policies for the case's category.
+1. **Common block**: hardcoded in ReactAgent source code — universal behavioral rules.
+2. **Category block** (optional): looked up from `category_prompts.json` by the case's `category` field. Contains domain-specific business rules and policies.
 
-Final system prompt = `common_block + "\n\n" + category_block`
+Final system prompt = `common_block + "\n\n" + category_block` (if category block exists).
 
-Both blocks are benchmark-controlled — users cannot modify them. Temperature defaults to 1.0 but is user-configurable.
+Both parts are benchmark-controlled — users cannot modify them. Temperature defaults to 1.0 but is user-configurable.
 
 ```python
 class ReactAgent(BaseAgent):
