@@ -88,3 +88,12 @@ class Model(ABC):
             Message with content, tool_calls, reasoning_content, token_usage filled.
         """
         ...
+
+    def to_config(self) -> dict:
+        return {
+            "model_id": self.model_id,
+            "model_class": type(self).__name__,
+            "adapter_class": type(self.adapter).__name__,
+            "max_context_tokens": self.max_context_tokens,
+            "temperature": self.temperature,
+        }

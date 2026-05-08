@@ -20,7 +20,8 @@ class CaseResult:
     env_name: str
     category: str
     interaction_mode: str
-    model_name: str
+    react_model_config: dict
+    user_model_config: dict | None
     messages: list[Message]
     tool_calls: list[dict[str, Any]]
     token_usage: TokenUsage | None
@@ -161,7 +162,8 @@ class CaseRunner:
             env_name=env_name,
             category=category,
             interaction_mode=interaction_mode,
-            model_name=self.react_agent.model.model_id,
+            react_model_config=self.react_agent.model.to_config(),
+            user_model_config=self.user_agent.model.to_config() if self.user_agent else None,
             messages=self._collect_messages(),
             tool_calls=self._collect_tool_calls(),
             token_usage=total_token_usage,
