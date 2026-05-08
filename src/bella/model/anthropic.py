@@ -113,7 +113,7 @@ class AnthropicModel(Model):
         response = self._client.messages.create(**kwargs)
 
         # Protocol-level extraction
-        text_parts = [block.text for block in response.content if block.type == "text"]
+        text_parts = [block.text.strip() for block in response.content if block.type == "text" and block.text.strip()]
         content = "\n".join(text_parts) if text_parts else ""
         thinking = [block.thinking for block in response.content if block.type == "thinking"]
         sdk_reasoning = "\n".join(thinking) if thinking else None
