@@ -36,5 +36,6 @@ class Message:
     role: Literal["system", "user", "assistant", "tool"]
     content: str | None = None
     tool_calls: list[ToolCall] | None = None
+    tool_call_id: str | None = None
     reasoning_content: str | None = None
     token_usage: TokenUsage | None = None
