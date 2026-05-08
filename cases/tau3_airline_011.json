@@ -3,18 +3,14 @@
   "env_name": "tau3_airline",
   "category": "tau3_airline",
   "source": "tau3",
-  "tags": [
-    "modification",
-    "cabin-downgrade",
-    "passenger-removal-refused"
-  ],
+  "tags": [],
   "interaction_mode": "dynamic",
-  "demand": "Remove passenger Sophia from the upcoming round trip flights LAS→DEN (departure May 19, return May 20) and get a refund to the original payment method.",
+  "demand": "You want to remove passenger Sophia from your upcoming round trip flights from LAS to DEN, departure May 19, return is May 20.",
   "world_setup": [],
   "user_agent_config": {
-    "role": "An impatient traveler trying to remove a passenger from an upcoming flight",
-    "personality": "Impatient, wants changes done quickly. Does not remember reservation ID for first 2 rounds, then finds it in email (GV1N64). If told passenger cannot be removed, accepts downgrade to basic economy for all. Asks about refund amount. Wants refund to original payment method.",
-    "knowledge_boundary": "Knows own name (James Patel), user ID (james_patel_9828). Finds reservation ID (GV1N64) after 2 rounds. Does not know policy details about passenger modification."
+    "role": "A customer calling about an airline reservation",
+    "personality": "You don't remember your reservation ID for the first 2 rounds of interaction but then suddenly find it in your email: it is GV1N64.\n\nYou are impatient and want the change to be done quickly. \n\nYou want the entire amount refunded to original payment method. \n\nIf and only if the agent says you cannot remove just one passenger, you want to downgrade all passengers to basic economy. \n\nAsk how much the refund would be.\n\nMake sure to ask the refund to be processed to the original payment method.",
+    "knowledge_boundary": "Your name is James Patel.\n\nYour user id is james_patel_9828."
   },
   "verify": [
     {

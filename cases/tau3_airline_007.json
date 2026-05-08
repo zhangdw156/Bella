@@ -3,21 +3,25 @@
   "env_name": "tau3_airline",
   "category": "tau3_airline",
   "source": "tau3",
-  "tags": [
-    "cancellation",
-    "upgrade",
-    "multi-reservation",
-    "complex"
-  ],
+  "tags": [],
   "interaction_mode": "dynamic",
-  "demand": "Cancel upcoming flights in reservations XEHM4B and 59XX6W. Also check other upcoming flights and their total cost.",
+  "demand": "You want to cancel your upcoming flights within reservation IDs XEHM4B and 59XX6W.",
   "world_setup": [],
   "user_agent_config": {
-    "role": "A sick traveler needing to cancel multiple upcoming reservations",
-    "personality": "Persistent and terse but clear. Is sick (relevant for insurance cancellation). If agent says a reservation is basic economy, asks to upgrade to business first (using CC ending in 2135) then cancel. After third agent message, also asks about other upcoming flights and total cost.",
-    "knowledge_boundary": "Knows own user ID (daiki_muller_1116), reservation IDs (XEHM4B, 59XX6W). Does not know which reservations are basic economy or what other flights exist."
+    "role": "A customer calling about an airline reservation",
+    "personality": "If the agent says either of the two reservations is basic economy, ask to upgrade to business first and then cancel the reservation (Using the CC ending in 2135).\n\nYou are very persistent and terse but clear.\n\nYou are sick.\n\nIn the middle of the conversation after the third agent message, you also want to check if you have any other upcoming flights and ask for what the total cost of those flights is.",
+    "knowledge_boundary": "Your user id is 'daiki_muller_1116'."
   },
   "verify": [
+    {
+      "sql": "SELECT json_extract(data, '$.cabin') FROM reservations WHERE reservation_id = 'XEHM4B'",
+      "expected": [
+        [
+          "business"
+        ]
+      ],
+      "order_matters": false
+    },
     {
       "sql": "SELECT json_extract(data, '$.status') FROM reservations WHERE reservation_id = 'XEHM4B'",
       "expected": [
@@ -32,15 +36,6 @@
       "expected": [
         [
           "cancelled"
-        ]
-      ],
-      "order_matters": false
-    },
-    {
-      "sql": "SELECT json_extract(data, '$.cabin') FROM reservations WHERE reservation_id = 'XEHM4B'",
-      "expected": [
-        [
-          "business"
         ]
       ],
       "order_matters": false

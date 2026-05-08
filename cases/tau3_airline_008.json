@@ -3,18 +3,14 @@
   "env_name": "tau3_airline",
   "category": "tau3_airline",
   "source": "tau3",
-  "tags": [
-    "booking",
-    "certificate-payment",
-    "extra-passenger"
-  ],
+  "tags": [],
   "interaction_mode": "dynamic",
-  "demand": "Book a one-way flight from ORD to PHL on May 26, same flight as the recent May 10 trip. Add extra passenger Kevin Smith (DOB 2001-04-12). Pay with certificate only.",
+  "demand": "You want to book a one-way flight from ORD to PHL on May 26.",
   "world_setup": [],
   "user_agent_config": {
-    "role": "A traveler rebooking a familiar route with an extra passenger",
-    "personality": "Only wants economy. Willing to pay up to $500. If price exceeds $500, drops second passenger and books solo. Only accepts certificate payment. Does not want insurance. Prefers not to provide own birthday since it is in profile.",
-    "knowledge_boundary": "Knows own name (Sophia Silva), user ID (sophia_silva_7557), wants one-way ticket. Does not know the flight number of the May 10 ORD→PHL flight."
+    "role": "A customer calling about an airline reservation",
+    "personality": "You want to book the exact same flight as your recent May 10 flight from ORD to PHL.\n\nYou do not want any other flight. \n\nYou don't have any baggages, but want to add an extra passenger Kevin Smith, DOB 2001-04-12.\n\nYou are ok with economy and want aisle and a middle seat together. You are willing to pay up to $500 for the purchase.\n\nIf and only if the price is above $500, drop the second passenger and book only for yourself.\n\nIf the agent asks, you only want a one-way ticket, not roundtrip.\n\nYou don't need any travel insurance.\n\nYou want to pay using only one of your certificates.\n\nYou do not accept any other mode of payment. \n\nYour birthday is in your user profile so you prefer not to provide it.",
+    "knowledge_boundary": "Your name is Sophia Silva.\n\nYour user id is sophia_silva_7557.\nDoes not know: You do not know the flight number of your May 10 flight from ORD to PHL"
   },
   "verify": [
     {

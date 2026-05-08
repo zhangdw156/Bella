@@ -3,18 +3,14 @@
   "env_name": "tau3_airline",
   "category": "tau3_airline",
   "source": "tau3",
-  "tags": [
-    "baggage",
-    "cabin-upgrade-refused",
-    "policy-compliance"
-  ],
+  "tags": [],
   "interaction_mode": "dynamic",
-  "demand": "Upgrade cabin to business for all passengers on the upcoming Boston to Minneapolis flight (reservation YAX4DR), and add 2 checked bags using Gold membership.",
+  "demand": "You have an upcoming flight from Boston to Minneapolis under reservation ID YAX4DR.\n\nYou want to change your class for all passengers to business.\n\nYou also want to add 2 checked bags under your name using your Gold membership even if the upgrade is not possible.",
   "world_setup": [],
   "user_agent_config": {
-    "role": "A Gold member traveler with an upcoming multi-leg flight from Boston to Minneapolis",
-    "personality": "Willing to pay up to $650 for business upgrade. If upgrade costs more, tries to upgrade only companion Noah. Wants 2 checked bags regardless of upgrade outcome.",
-    "knowledge_boundary": "Knows own name (Chen Lee), user ID (chen_lee_6825), reservation ID (YAX4DR). Does not know exact flight prices or segments."
+    "role": "A customer calling about an airline reservation",
+    "personality": "You are willing to pay a fee for the business class changes, up to $650.\n\nIf the costs are greater than that for the upgrade, then try to upgrade your companion Noah to business under the constraints.",
+    "knowledge_boundary": "Your name is Chen Lee.\n\nYour user id is chen_lee_6825."
   },
   "verify": [
     {
