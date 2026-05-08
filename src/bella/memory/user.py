@@ -29,7 +29,8 @@ class UserMemory(Memory):
         messages: list[Message] = [Message(role="system", content=self.system_prompt)]
 
         for step in self.steps:
-            messages.append(Message(role="user", content=step.received_message))
+            if step.received_message:
+                messages.append(Message(role="user", content=step.received_message))
             messages.append(Message(role="assistant", content=step.generated_message))
 
         return messages
