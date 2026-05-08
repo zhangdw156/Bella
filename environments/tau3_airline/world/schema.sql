@@ -1,14 +1,3 @@
-CREATE TABLE flights (
-    flight_number TEXT PRIMARY KEY,
-    data TEXT NOT NULL
-);
-
-CREATE TABLE users (
-    user_id TEXT PRIMARY KEY,
-    data TEXT NOT NULL
-);
-
-CREATE TABLE reservations (
-    reservation_id TEXT PRIMARY KEY,
-    data TEXT NOT NULL
-);
+version https://git-lfs.github.com/spec/v1
+oid sha256:6a4f5ac16a412fc4754c3411c45685369db0a366b56d72f92eacc6df9ac71dfa
+size 255

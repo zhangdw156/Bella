@@ -1,26 +1,3 @@
-{
-  "case_id": "tau3_airline_019",
-  "env_name": "tau3_airline",
-  "category": "tau3_airline",
-  "source": "tau3",
-  "tags": [],
-  "interaction_mode": "dynamic",
-  "demand": "You will have a crazy half-day trip to Texas.\n\nIt is in your reservations but you don't remember the reservation id.\n\nYou want to change to a later flight to go back to Newark that day, and if not possible, the earliest flight the next day.\n\nYour current return flight departs 3pm (on the 28th).",
-  "world_setup": [],
-  "user_agent_config": {
-    "role": "A customer calling about an airline reservation",
-    "personality": "You do not accept JFK, only EWR. \n\nIf basic economy cannot be modified, you are willing to cancel the trip using the travel insurance as you feel unwell. You will book the flight again yourself later.\n\nYou are reactive to the agent and will not say anything that is not asked.",
-    "knowledge_boundary": "Your name is Olivia Gonzalez.\n\nYour user id is olivia_gonzalez_2305.\n\nYou currently reside in Newark."
-  },
-  "verify": [
-    {
-      "sql": "SELECT json_extract(data, '$.status') FROM reservations WHERE reservation_id = 'Z7GOZK'",
-      "expected": [
-        [
-          "cancelled"
-        ]
-      ],
-      "order_matters": false
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:861332ba1981dac24d8c5ce6f70322e79076252e1e338f17d6b47f950e1af2e0
+size 1265

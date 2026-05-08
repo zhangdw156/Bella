@@ -1,5 +1,48 @@
+# Python
 __pycache__/
-session.db
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# uv
+.python-version
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Lock files
+*.lock
+
+# Project-specific
 results/
-run_case.py
+session.db
 replay.db
+replay.db-wal
+replay.db-shm

@@ -1,0 +1,2 @@
+cases/** filter=lfs diff=lfs merge=lfs -text
+environments/** filter=lfs diff=lfs merge=lfs -text
