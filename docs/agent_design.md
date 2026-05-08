@@ -9,127 +9,169 @@ BELLA uses two agent types during evaluation:
 - **ReactAgent**: drives the model under test. Loops over LLM calls, detects tool calls via a Model Adapter, executes them against the environment backend, and feeds results back.
 - **UserAgent**: simulates a human user for dynamic-mode cases. Generates contextual messages based on persona configuration and signals conversation completion.
 
-Both inherit from a common `BaseAgent` abstract class (inheritance-based design, not layered composition).
+Both inherit from a common `BaseAgent` abstract class (inheritance-based design, not layered composition). Both use Step-based Memory (not raw message lists) for context management.
 
 ## Class Hierarchy
 
 ```
-BaseAgent (ABC)
-├── ReactAgent      # Tool-calling loop for the model under test
-└── UserAgent       # LLM-based user simulation for dynamic mode
+Data Layer:
+  Message(role, content, tool_calls, reasoning, token_usage)
+  ToolCall(name, arguments, id, result)
+  TokenUsage(input_tokens, output_tokens)
+  Timing(start_time, end_time)
+
+Memory Layer:
+  Step (base)
+  ├── UserStep(content)
+  ├── AssistantStep(content, tool_calls, reasoning)
+  └── ToolResultStep(tool_call_id, name, result)
+
+  Turn:
+    user_step: UserStep
+    react_steps: list[tuple[AssistantStep, list[ToolResultStep]]]
+
+  Memory:
+    system_prompt: str
+    turns: list[Turn]
+
+Compaction Layer:
+  ContextCompactor (protocol)
+
+Adapter Layer:
+  ModelAdapter (protocol)
+
+Agent Layer:
+  BaseAgent (ABC)
+  ├── ReactAgent
+  └── UserAgent
+
+Result Layer:
+  TurnResult(assistant_message, tool_calls, reasoning, token_usage, timing)
+  RunResult(turns, total_tool_calls, token_usage, timing, pass)
 ```
 
-## BaseAgent
+---
 
-Abstract base class providing shared infrastructure:
+## Data Layer
+
+### Message
 
 ```python
-class BaseAgent(ABC):
-    """Base class for all BELLA agents."""
+@dataclass
+class Message:
+    role: str                              # "system" | "user" | "assistant" | "tool"
+    content: str | None = None
+    tool_calls: list[ToolCall] | None = None
+    reasoning: str | None = None
+    token_usage: TokenUsage | None = None
+```
 
-    def __init__(self, protocol: str, model_id: str, base_url: str, api_key: str,
-                 max_context_tokens: int = 128000):
-        """
+### ToolCall
+
+```python
+@dataclass
+class ToolCall:
+    name: str
+    arguments: dict
+    id: str                               # SDK-generated call ID
+    result: dict | None = None            # Filled after execution
+```
+
+### TokenUsage
+
+```python
+@dataclass
+class TokenUsage:
+    input_tokens: int
+    output_tokens: int
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+```
+
+### Timing
+
+```python
+@dataclass
+class Timing:
+    start_time: float
+    end_time: float | None = None
+
+    @property
+    def duration(self) -> float | None:
+        return None if self.end_time is None else self.end_time - self.start_time
+```
+
+---
+
+## Memory Layer
+
+Memory is a list of Steps grouped into Turns. Messages are reconstructed from Steps before each LLM call, giving precise control over what's visible in context.
+
+### Step Types
+
+```python
+@dataclass
+class UserStep:
+    content: str
+
+@dataclass
+class AssistantStep:
+    content: str                           # Text response
+    tool_calls: list[ToolCall]             # Tool calls made (empty if none)
+    reasoning: str | None = None           # Thinking/reasoning content
+    token_usage: TokenUsage | None = None
+
+@dataclass
+class ToolResultStep:
+    tool_call_id: str
+    name: str
+    result: dict
+```
+
+### Turn
+
+A Turn represents one user message followed by the agent's full response (which may involve multiple LLM calls with tool use).
+
+```python
+@dataclass
+class Turn:
+    user_step: UserStep
+    react_steps: list[tuple[AssistantStep, list[ToolResultStep]]]
+    timing: Timing | None = None
+```
+
+### Memory
+
+```python
+class Memory:
+    system_prompt: str
+    turns: list[Turn]
+
+    def to_messages(self, current_turn_index: int, adapter: ModelAdapter) -> list[Message]:
+        """Reconstruct messages from Steps.
+
+        Reasoning visibility rule:
+        - Previous turns (index < current_turn_index): reasoning STRIPPED
+        - Current turn (index == current_turn_index): reasoning INCLUDED
+          via adapter.format_reasoning()
+
         Args:
-            protocol: "anthropic", "openai_chat_completions", or "openai_responses"
-            model_id: Model identifier passed to the SDK
-            base_url: API endpoint URL
-            api_key: Authentication key
-            max_context_tokens: Maximum context window size for auto-compaction
+            current_turn_index: Index of the turn currently being processed.
+            adapter: Used to format reasoning into content when visible.
+
+        Returns:
+            Message list ready for LLM call.
         """
+        ...
+
+    def estimate_tokens(self) -> int:
+        """Estimate total token count using character-based formula."""
         ...
 ```
 
-Shared responsibilities:
-- SDK client management (OpenAI / Anthropic, selected by `protocol`)
-- Message format conversion (internal canonical format <-> protocol-specific format)
-- Token usage tracking
-- Retry and timeout handling
-- **Auto context compaction** (see below)
-
-### Protocol Support
-
-| Protocol | SDK | Messages Format | Tool Result Format | Reasoning Format |
-|----------|-----|----------------|-------------------|-----------------|
-| `anthropic` | anthropic | messages + system (separate) | `tool_result` block in user msg | `thinking` content blocks |
-| `openai_chat_completions` | openai | messages list | `role: "tool"` with `tool_call_id` | `reasoning_content` field |
-| `openai_responses` | openai | items list | `function_call_output` item | reasoning items |
-
-### Auto Context Compaction
-
-When the message context approaches `max_context_tokens`, BaseAgent automatically compresses older messages. The compaction strategy (inspired by Qwen-Agent's multi-phase truncation):
-
-1. **Phase 1**: Truncate tool result content in older turns (keep tool name and status, drop verbose output)
-2. **Phase 2**: Drop entire middle conversation turns (preserve first and last turns)
-3. **Phase 3**: Truncate remaining long messages, keeping both beginning and end
-
-Both ReactAgent and UserAgent inherit this capability.
-
-## ReactAgent
-
-The agent that evaluates the model under test. Receives a `ModelAdapter` via composition.
-
-### System Prompt Assembly
-
-The ReactAgent's system prompt is assembled from two parts at runtime:
-
-1. **Common block**: hardcoded in ReactAgent source code — universal behavioral rules.
-2. **Category block** (optional): looked up from `category_prompts.json` by the case's `category` field. Contains domain-specific business rules and policies.
-
-Final system prompt = `common_block + "\n\n" + category_block` (if category block exists).
-
-Both parts are benchmark-controlled — users cannot modify them. Temperature defaults to 1.0 but is user-configurable.
-
-```python
-class ReactAgent(BaseAgent):
-    def __init__(self, adapter: ModelAdapter, max_llm_calls: int = 12, **kwargs):
-        super().__init__(**kwargs)
-        self.adapter = adapter
-        self.max_llm_calls = max_llm_calls
-```
-
-### Core Loop
-
-```python
-def run_turn(self, messages: list[dict], tools: list[dict], backend) -> TurnResult:
-    """Execute one conversation turn (may involve multiple LLM calls)."""
-    tool_calls_collected = []
-
-    for _ in range(self.max_llm_calls):
-        response = self._call_llm(messages, tools)
-
-        # Extract reasoning (if any)
-        reasoning = self.adapter.parse_reasoning(response)
-
-        if self.adapter.is_tool_call(response):
-            parsed = self.adapter.parse_tool_call(response)
-            for tc in parsed:
-                result = backend.call(tc["name"], tc["arguments"])
-                tool_calls_collected.append({
-                    "name": tc["name"],
-                    "arguments": tc["arguments"],
-                    "result": result
-                })
-            # Append assistant message WITH reasoning (visible within this turn)
-            self._append_assistant_message(messages, response, reasoning, include_reasoning=True)
-            # Append tool results
-            for tc in tool_calls_collected[-len(parsed):]:
-                self._append_tool_result(messages, tc)
-        else:
-            # No tool call — turn complete
-            break
-
-    return TurnResult(
-        assistant_message=self._extract_text(response),
-        tool_calls=tool_calls_collected,
-        reasoning=reasoning,
-        messages=messages
-    )
-```
-
 ### Reasoning Visibility Rules
-
-Reasoning content follows a **same-turn visible, cross-turn invisible** policy:
 
 ```
 Turn 1 (react loop):
@@ -140,28 +182,47 @@ Turn 1 (react loop):
 
 Turn 2 (new user query):
   Step 1: LLM → Turn 1's reasoning stripped from context ✗
+  Step 2: LLM → context includes Turn 2 Step 1's reasoning ✓
 ```
 
-**Within the same turn's react loop**: reasoning content is included in the assistant message via `adapter.format_reasoning()`, so subsequent LLM calls in the same loop can see it.
+Within the same turn's react loop: reasoning is visible (formatted via `adapter.format_reasoning(content, reasoning_content)`).
 
-**Across turns**: when building context for a new turn (after a new user message), previous turns' reasoning content is stripped from assistant messages. Only `content` is preserved.
+Across turns: reasoning is stripped. Only `content` from previous turns is included.
 
-### Interaction with Model Adapter
+---
 
-The adapter handles all model-specific output parsing:
+## Compaction Layer
 
+### ContextCompactor Protocol
+
+```python
+class ContextCompactor(Protocol):
+    def compact(self, memory: Memory) -> Memory:
+        """Compact memory to fit within token budget.
+
+        Invariants:
+        - system_prompt is always preserved.
+        - The last turn (current) is always preserved.
+        - Returns a new Memory instance (does not mutate input).
+        """
+        ...
 ```
-LLM Response → adapter.is_tool_call(response) → bool
-             → adapter.parse_tool_call(response) → [{"name": ..., "arguments": ...}]
-             → adapter.parse_reasoning(response) → str | None
-             → adapter.format_reasoning(content, reasoning_content) → str
-```
 
-Everything else (sending tools to the model, formatting tool results back, context management) is handled internally by ReactAgent based on the `protocol` field.
+The compactor is initialized with `max_context_tokens` and optionally a model config (for summarization-based compaction). Token estimation uses a mathematical formula (e.g., character count / 3.5), not a tokenizer.
 
-## Model Adapter
+### Compaction Strategies (pluggable)
 
-### Protocol
+- **TruncationCompactor**: drops old turns, truncates tool results (fast, no LLM call)
+- **SummarizationCompactor**: calls LLM to summarize old turns (better quality, costs extra)
+- **NoopCompactor**: does nothing (for short conversations or testing)
+
+BaseAgent holds a `self.compactor` instance. Before each LLM call, if `memory.estimate_tokens() > max_context_tokens`, compaction is triggered.
+
+---
+
+## Adapter Layer
+
+### ModelAdapter Protocol
 
 ```python
 class ModelAdapter(Protocol):
@@ -171,24 +232,23 @@ class ModelAdapter(Protocol):
 
     def parse_tool_call(self, response) -> list[dict]:
         """Extract tool calls from the response.
-        Returns: [{"name": "tool_name", "arguments": {"key": "value"}}, ...]
+        Returns: [{"name": "...", "arguments": {...}, "id": "..."}]
         """
         ...
 
     def parse_reasoning(self, response) -> str | None:
-        """Extract reasoning/thinking content from the response.
-        Returns the reasoning text, or None if no reasoning is present.
-        """
+        """Extract reasoning/thinking content from the response."""
         ...
 
     def format_reasoning(self, content: str, reasoning_content: str) -> str:
-        """Combine content and reasoning_content into a single string for context.
-        Used when reasoning needs to be visible in subsequent LLM calls within the same turn.
+        """Combine content and reasoning_content into a single string.
+        Used when reasoning needs to be visible in subsequent LLM calls
+        within the same turn.
         """
         ...
 ```
 
-### Built-in Defaults
+### Built-in Adapters
 
 ```python
 class OpenAIChatCompletionsAdapter:
@@ -197,7 +257,7 @@ class OpenAIChatCompletionsAdapter:
 
     def parse_tool_call(self, response) -> list[dict]:
         return [
-            {"name": tc.function.name, "arguments": json.loads(tc.function.arguments)}
+            {"name": tc.function.name, "arguments": json.loads(tc.function.arguments), "id": tc.id}
             for tc in response.choices[0].message.tool_calls
         ]
 
@@ -214,7 +274,7 @@ class AnthropicAdapter:
 
     def parse_tool_call(self, response) -> list[dict]:
         return [
-            {"name": block.name, "arguments": block.input}
+            {"name": block.name, "arguments": block.input, "id": block.id}
             for block in response.content if block.type == "tool_use"
         ]
 
@@ -232,7 +292,7 @@ class OpenAIResponsesAdapter:
 
     def parse_tool_call(self, response) -> list[dict]:
         return [
-            {"name": item.name, "arguments": json.loads(item.arguments)}
+            {"name": item.name, "arguments": json.loads(item.arguments), "id": item.call_id}
             for item in response.output if item.type == "function_call"
         ]
 
@@ -245,20 +305,17 @@ class OpenAIResponsesAdapter:
         return f"{reasoning_content}\n\n{content}"
 ```
 
-### Custom Adapter
-
-Users provide a Python file with an `Adapter` class. Only override the methods that differ from the default:
+### Custom Adapter Example (Qwen3)
 
 ```python
 # adapters/qwen3.py
-
 class Adapter:
     def is_tool_call(self, response) -> bool:
         return response.choices[0].message.tool_calls is not None
 
     def parse_tool_call(self, response) -> list[dict]:
         return [
-            {"name": tc.function.name, "arguments": json.loads(tc.function.arguments)}
+            {"name": tc.function.name, "arguments": json.loads(tc.function.arguments), "id": tc.id}
             for tc in response.choices[0].message.tool_calls
         ]
 
@@ -274,24 +331,166 @@ class Adapter:
         return f"<think>{reasoning_content}</think>\n{content}"
 ```
 
-Specified in config: `model.adapter: adapters/qwen3.py`
+---
 
-## UserAgent
+## Agent Layer
 
-Simulates a human user for dynamic-mode cases. Based on Astra's ChatUserAgent design.
+### BaseAgent
+
+```python
+class BaseAgent(ABC):
+    def __init__(
+        self,
+        protocol: str,                    # "anthropic" | "openai_chat_completions" | "openai_responses"
+        model_id: str,
+        base_url: str,
+        api_key: str,
+        max_context_tokens: int = 128000,
+        compactor: ContextCompactor | None = None,
+        temperature: float = 1.0,
+    ):
+        ...
+```
+
+Shared responsibilities:
+- SDK client management (selected by `protocol`)
+- Message format conversion (Memory → protocol-specific messages)
+- Token usage tracking
+- Retry and timeout handling
+- Auto context compaction (calls `self.compactor.compact(memory)` when token estimate exceeds budget)
+
+### Protocol Support
+
+| Protocol | SDK | Messages Format | Tool Result Format | Reasoning Format |
+|----------|-----|----------------|-------------------|-----------------|
+| `anthropic` | anthropic | messages + system (separate) | `tool_result` block in user msg | `thinking` content blocks |
+| `openai_chat_completions` | openai | messages list | `role: "tool"` with `tool_call_id` | `reasoning_content` field |
+| `openai_responses` | openai | items list | `function_call_output` item | reasoning items |
+
+### ReactAgent
+
+```python
+class ReactAgent(BaseAgent):
+    def __init__(
+        self,
+        adapter: ModelAdapter,
+        max_llm_calls_per_turn: int = 12,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.adapter = adapter
+        self.max_llm_calls_per_turn = max_llm_calls_per_turn
+        self.memory: Memory | None = None
+```
+
+#### System Prompt Assembly
+
+The ReactAgent's system prompt is assembled from two parts at runtime:
+
+1. **Common block**: hardcoded in ReactAgent source code — universal behavioral rules.
+2. **Category block** (optional): looked up from `category_prompts.json` by the case's `category` field.
+
+Final system prompt = `common_block + "\n\n" + category_block` (if exists).
+
+Both parts are benchmark-controlled — users cannot modify them.
+
+#### Core Loop
+
+```python
+def run_turn(self, user_message: str, tools: list[dict], backend) -> TurnResult:
+    """Execute one conversation turn (may involve multiple LLM calls)."""
+    # Add user step to memory
+    turn = Turn(user_step=UserStep(content=user_message), react_steps=[])
+    self.memory.turns.append(turn)
+    current_turn_idx = len(self.memory.turns) - 1
+
+    for _ in range(self.max_llm_calls_per_turn):
+        # Check compaction
+        if self.memory.estimate_tokens() > self.max_context_tokens:
+            self.memory = self.compactor.compact(self.memory)
+
+        # Reconstruct messages from memory
+        messages = self.memory.to_messages(current_turn_idx, self.adapter)
+
+        # Call LLM
+        response = self._call_llm(messages, tools)
+
+        # Parse response
+        reasoning = self.adapter.parse_reasoning(response)
+        content = self._extract_text(response)
+
+        if self.adapter.is_tool_call(response):
+            parsed_calls = self.adapter.parse_tool_call(response)
+            # Execute tools
+            tool_results = []
+            for tc in parsed_calls:
+                result = backend.call(tc["name"], tc["arguments"])
+                tool_results.append(ToolResultStep(
+                    tool_call_id=tc["id"], name=tc["name"], result=result
+                ))
+            # Record in memory
+            assistant_step = AssistantStep(
+                content=content,
+                tool_calls=[ToolCall(**tc, result=r.result) for tc, r in zip(parsed_calls, tool_results)],
+                reasoning=reasoning,
+            )
+            turn.react_steps.append((assistant_step, tool_results))
+        else:
+            # No tool call — turn complete
+            assistant_step = AssistantStep(content=content, tool_calls=[], reasoning=reasoning)
+            turn.react_steps.append((assistant_step, []))
+            break
+
+    return TurnResult(...)
+```
+
+### UserAgent
 
 ```python
 class UserAgent(BaseAgent):
     def __init__(self, max_turns: int = 30, **kwargs):
         super().__init__(**kwargs)
         self.max_turns = max_turns
+        self.memory: UserMemory | None = None
 ```
 
-### Interface
+#### UserAgent Memory
+
+UserAgent uses a simplified memory structure (no tool calls):
+
+```python
+@dataclass
+class UserAgentStep:
+    received_message: str         # Assistant's response (maps to "user" role in LLM call due to role inversion)
+    generated_message: str        # Generated user message (maps to "assistant" role in LLM call)
+    reasoning: str | None = None
+    is_done: bool = False
+
+class UserMemory:
+    system_prompt: str            # Built from demand + user_agent_config
+    steps: list[UserAgentStep]
+
+    def to_messages(self) -> list[Message]:
+        """Reconstruct messages with role inversion.
+        system: persona + demand + rules
+        assistant: generated user messages
+        user: received assistant responses
+        """
+        ...
+```
+
+#### Interface
 
 ```python
 def start(self, demand: str, user_agent_config: dict) -> UserTurnResult:
-    """Generate the first user message based on demand and persona."""
+    """Initialize memory with system prompt and generate first user message.
+
+    System prompt is built from:
+    - demand: what the user wants to achieve
+    - user_agent_config.role: who the user is
+    - user_agent_config.personality: how the user behaves
+    - user_agent_config.knowledge_boundary: what the user knows/doesn't know
+    """
     ...
 
 def respond(self, assistant_message: str) -> UserTurnResult:
@@ -299,53 +498,85 @@ def respond(self, assistant_message: str) -> UserTurnResult:
     ...
 ```
 
-### Return Type
+#### Return Type
 
 ```python
 @dataclass
 class UserTurnResult:
     message: str      # Generated user message
-    is_done: bool     # True when user's goal is achieved or conversation should end
+    is_done: bool     # True when goal achieved, impossible, or conversation should end
 ```
 
-### Design Choices
+#### Design Choices
 
-- **Role inversion** (from Astra): system prompt contains persona + demand + rules. The "assistant" role in the LLM call generates user messages, while the "user" role receives the real assistant's responses. This enables better prompt caching.
-- **Gradual information reveal**: system prompt instructs the user agent to reveal information progressively (not dump everything in the first message).
-- **`[DONE]` signal**: when the user agent determines the goal is achieved (or impossible), it includes `[DONE]` in its output, parsed as `is_done=True`.
-- **LLM globally fixed**: the user agent's model is configured in `bella.yaml` under `user_agent`, not per-case. This ensures fair comparison.
+- **Role inversion**: system prompt contains persona + demand + rules. The "assistant" role generates user messages, while the "user" role receives assistant responses. Enables prompt caching.
+- **Gradual information reveal**: system prompt instructs progressive disclosure (first message = primary reason only, reveal details when asked).
+- **`[DONE]` signal**: output contains `[DONE]` → `is_done=True`. Triggered when goal is achieved, goal is impossible, or assistant transfers to human.
+- **Knowledge boundary enforcement**: system prompt explicitly states what to know and not know. If asked about unknown info, respond with "I don't know" or a vague answer.
 - **Context compaction**: inherits BaseAgent's auto-compaction for long conversations.
+- **LLM globally fixed**: model configured in `bella.yaml` under `user_agent`, not per-case.
+
+---
 
 ## Simulation Orchestration
 
 ### Fixed Mode (Track A)
 
 ```python
-for user_msg in case["user_demands"]:
-    messages.append({"role": "user", "content": user_msg})
-    result = react_agent.run_turn(messages, tools, backend)
-    # Strip reasoning from this turn's messages before next turn
-    strip_reasoning_from_last_turn(messages)
-    all_tool_calls.extend(result.tool_calls)
+def run_fixed(case, react_agent, tools, backend) -> RunResult:
+    react_agent.init_memory(system_prompt)
+
+    for user_msg in case["user_demands"]:
+        result = react_agent.run_turn(user_msg, tools, backend)
+
+    return RunResult(...)
 ```
 
 ### Dynamic Mode (Track B)
 
 ```python
-user_result = user_agent.start(case["demand"], case["user_agent_config"])
-messages.append({"role": "user", "content": user_result.message})
+def run_dynamic(case, react_agent, user_agent, tools, backend) -> RunResult:
+    react_agent.init_memory(system_prompt)
 
-while not user_result.is_done and turn_count < max_turns:
-    result = react_agent.run_turn(messages, tools, backend)
-    # Strip reasoning from this turn's messages before next turn
-    strip_reasoning_from_last_turn(messages)
-    all_tool_calls.extend(result.tool_calls)
+    user_result = user_agent.start(case["demand"], case["user_agent_config"])
 
-    user_result = user_agent.respond(result.assistant_message)
-    if not user_result.is_done:
-        messages.append({"role": "user", "content": user_result.message})
-    turn_count += 1
+    while not user_result.is_done and turn_count < max_turns:
+        result = react_agent.run_turn(user_result.message, tools, backend)
+        user_result = user_agent.respond(result.assistant_message)
+        turn_count += 1
+
+    return RunResult(...)
 ```
+
+---
+
+## Result Layer
+
+### TurnResult
+
+```python
+@dataclass
+class TurnResult:
+    assistant_message: str
+    tool_calls: list[ToolCall]
+    reasoning: str | None
+    token_usage: TokenUsage | None
+    timing: Timing | None
+```
+
+### RunResult
+
+```python
+@dataclass
+class RunResult:
+    turns: list[Turn]
+    total_tool_calls: list[ToolCall]     # Flattened from all turns
+    token_usage: TokenUsage              # Aggregated
+    timing: Timing
+    ended_normally: bool                 # UserAgent signaled [DONE] or all user_demands exhausted
+```
+
+---
 
 ## Dependencies
 
