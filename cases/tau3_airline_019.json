@@ -1,0 +1,30 @@
+{
+  "case_id": "tau3_airline_019",
+  "env_name": "tau3_airline",
+  "category": "tau3_airline",
+  "source": "tau3",
+  "tags": [
+    "cancellation",
+    "basic-economy",
+    "insurance"
+  ],
+  "interaction_mode": "dynamic",
+  "demand": "Cancel the upcoming half-day trip to Texas. The current return flight departs at 3pm on the 28th. Want to change to a later flight back to Newark, but if basic economy cannot be modified, cancel using travel insurance.",
+  "world_setup": [],
+  "user_agent_config": {
+    "role": "A traveler with an upcoming half-day trip to Texas who resides in Newark",
+    "personality": "Reactive, will not volunteer information unless asked. Does not accept JFK, only EWR. Willing to cancel if modification is not possible.",
+    "knowledge_boundary": "Knows own name (Olivia Gonzalez), user ID (olivia_gonzalez_2305), and that the return flight departs 3pm on the 28th. Does not remember reservation ID."
+  },
+  "verify": [
+    {
+      "sql": "SELECT json_extract(data, '$.status') FROM reservations WHERE reservation_id = 'Z7GOZK'",
+      "expected": [
+        [
+          "cancelled"
+        ]
+      ],
+      "order_matters": false
+    }
+  ]
+}

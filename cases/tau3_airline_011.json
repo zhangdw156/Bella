@@ -1,0 +1,30 @@
+{
+  "case_id": "tau3_airline_011",
+  "env_name": "tau3_airline",
+  "category": "tau3_airline",
+  "source": "tau3",
+  "tags": [
+    "modification",
+    "cabin-downgrade",
+    "passenger-removal-refused"
+  ],
+  "interaction_mode": "dynamic",
+  "demand": "Remove passenger Sophia from the upcoming round trip flights LAS→DEN (departure May 19, return May 20) and get a refund to the original payment method.",
+  "world_setup": [],
+  "user_agent_config": {
+    "role": "An impatient traveler trying to remove a passenger from an upcoming flight",
+    "personality": "Impatient, wants changes done quickly. Does not remember reservation ID for first 2 rounds, then finds it in email (GV1N64). If told passenger cannot be removed, accepts downgrade to basic economy for all. Asks about refund amount. Wants refund to original payment method.",
+    "knowledge_boundary": "Knows own name (James Patel), user ID (james_patel_9828). Finds reservation ID (GV1N64) after 2 rounds. Does not know policy details about passenger modification."
+  },
+  "verify": [
+    {
+      "sql": "SELECT json_extract(data, '$.cabin') FROM reservations WHERE reservation_id = 'GV1N64'",
+      "expected": [
+        [
+          "basic_economy"
+        ]
+      ],
+      "order_matters": false
+    }
+  ]
+}

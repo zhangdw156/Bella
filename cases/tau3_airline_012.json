@@ -1,0 +1,39 @@
+{
+  "case_id": "tau3_airline_012",
+  "env_name": "tau3_airline",
+  "category": "tau3_airline",
+  "source": "tau3",
+  "tags": [
+    "baggage",
+    "cabin-upgrade-refused",
+    "policy-compliance"
+  ],
+  "interaction_mode": "dynamic",
+  "demand": "Upgrade cabin to business for all passengers on the upcoming Boston to Minneapolis flight (reservation YAX4DR), and add 2 checked bags using Gold membership.",
+  "world_setup": [],
+  "user_agent_config": {
+    "role": "A Gold member traveler with an upcoming multi-leg flight from Boston to Minneapolis",
+    "personality": "Willing to pay up to $650 for business upgrade. If upgrade costs more, tries to upgrade only companion Noah. Wants 2 checked bags regardless of upgrade outcome.",
+    "knowledge_boundary": "Knows own name (Chen Lee), user ID (chen_lee_6825), reservation ID (YAX4DR). Does not know exact flight prices or segments."
+  },
+  "verify": [
+    {
+      "sql": "SELECT json_extract(data, '$.total_baggages') FROM reservations WHERE reservation_id = 'YAX4DR'",
+      "expected": [
+        [
+          2
+        ]
+      ],
+      "order_matters": false
+    },
+    {
+      "sql": "SELECT json_extract(data, '$.nonfree_baggages') FROM reservations WHERE reservation_id = 'YAX4DR'",
+      "expected": [
+        [
+          0
+        ]
+      ],
+      "order_matters": false
+    }
+  ]
+}

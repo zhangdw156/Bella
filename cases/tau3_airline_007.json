@@ -1,0 +1,49 @@
+{
+  "case_id": "tau3_airline_007",
+  "env_name": "tau3_airline",
+  "category": "tau3_airline",
+  "source": "tau3",
+  "tags": [
+    "cancellation",
+    "upgrade",
+    "multi-reservation",
+    "complex"
+  ],
+  "interaction_mode": "dynamic",
+  "demand": "Cancel upcoming flights in reservations XEHM4B and 59XX6W. Also check other upcoming flights and their total cost.",
+  "world_setup": [],
+  "user_agent_config": {
+    "role": "A sick traveler needing to cancel multiple upcoming reservations",
+    "personality": "Persistent and terse but clear. Is sick (relevant for insurance cancellation). If agent says a reservation is basic economy, asks to upgrade to business first (using CC ending in 2135) then cancel. After third agent message, also asks about other upcoming flights and total cost.",
+    "knowledge_boundary": "Knows own user ID (daiki_muller_1116), reservation IDs (XEHM4B, 59XX6W). Does not know which reservations are basic economy or what other flights exist."
+  },
+  "verify": [
+    {
+      "sql": "SELECT json_extract(data, '$.status') FROM reservations WHERE reservation_id = 'XEHM4B'",
+      "expected": [
+        [
+          "cancelled"
+        ]
+      ],
+      "order_matters": false
+    },
+    {
+      "sql": "SELECT json_extract(data, '$.status') FROM reservations WHERE reservation_id = '59XX6W'",
+      "expected": [
+        [
+          "cancelled"
+        ]
+      ],
+      "order_matters": false
+    },
+    {
+      "sql": "SELECT json_extract(data, '$.cabin') FROM reservations WHERE reservation_id = 'XEHM4B'",
+      "expected": [
+        [
+          "business"
+        ]
+      ],
+      "order_matters": false
+    }
+  ]
+}

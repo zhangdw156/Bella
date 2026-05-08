@@ -1,0 +1,41 @@
+{
+  "case_id": "tau3_airline_008",
+  "env_name": "tau3_airline",
+  "category": "tau3_airline",
+  "source": "tau3",
+  "tags": [
+    "booking",
+    "certificate-payment",
+    "extra-passenger"
+  ],
+  "interaction_mode": "dynamic",
+  "demand": "Book a one-way flight from ORD to PHL on May 26, same flight as the recent May 10 trip. Add extra passenger Kevin Smith (DOB 2001-04-12). Pay with certificate only.",
+  "world_setup": [],
+  "user_agent_config": {
+    "role": "A traveler rebooking a familiar route with an extra passenger",
+    "personality": "Only wants economy. Willing to pay up to $500. If price exceeds $500, drops second passenger and books solo. Only accepts certificate payment. Does not want insurance. Prefers not to provide own birthday since it is in profile.",
+    "knowledge_boundary": "Knows own name (Sophia Silva), user ID (sophia_silva_7557), wants one-way ticket. Does not know the flight number of the May 10 ORD→PHL flight."
+  },
+  "verify": [
+    {
+      "sql": "SELECT COUNT(*) FROM reservations WHERE reservation_id = 'HATHAT'",
+      "expected": [
+        [
+          1
+        ]
+      ],
+      "order_matters": false
+    },
+    {
+      "sql": "SELECT json_extract(data, '$.origin'), json_extract(data, '$.destination'), json_extract(data, '$.cabin') FROM reservations WHERE reservation_id = 'HATHAT'",
+      "expected": [
+        [
+          "ORD",
+          "PHL",
+          "economy"
+        ]
+      ],
+      "order_matters": false
+    }
+  ]
+}
