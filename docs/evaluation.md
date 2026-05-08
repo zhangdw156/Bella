@@ -12,19 +12,21 @@ BELLA uses a single YAML configuration file with [Hydra](https://hydra.cc/) for 
 # Model under test
 model:
   name: "Qwen3-8B"               # Display name (used in output directories and reports)
-  provider: "openai"              # openai | anthropic
+  protocol: "openai_chat_completions"  # anthropic | openai_chat_completions | openai_responses
   model_id: "Qwen3-8B"           # Model identifier passed to the SDK
   base_url: "http://localhost:8000/v1"
   api_key: "xxx"
   adapter: null                   # Path to custom ModelAdapter file (null = use default)
   temperature: 1.0                # Default 1.0, user-configurable
+  max_context_tokens: 128000      # Context window size for auto-compaction
 
 # User agent (globally fixed by benchmark for fairness)
 user_agent:
-  provider: "openai"
+  protocol: "openai_chat_completions"
   model_id: "gpt-4.1"
   base_url: "https://api.openai.com/v1"
   api_key: "${oc.env:OPENAI_API_KEY}"
+  max_context_tokens: 128000
 
 # Evaluation parameters
 subset: "all"                     # Case subset to evaluate (see Case Selection)
@@ -46,7 +48,7 @@ The entry point is `bella run`, decorated with `@hydra.main()`.
 bella run
 
 # Override model config
-bella run model.name=GPT-4.1 model.provider=openai model.model_id=gpt-4.1 \
+bella run model.name=GPT-4.1 model.protocol=openai_chat_completions model.model_id=gpt-4.1 \
          model.base_url=https://api.openai.com/v1 model.api_key=sk-xxx
 
 # Custom adapter for non-standard models
