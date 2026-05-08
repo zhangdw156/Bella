@@ -48,7 +48,8 @@ class AnthropicModel(Model):
                 content = msg.content or ""
                 if msg.reasoning_content:
                     content = self.adapter.format_reasoning(content, msg.reasoning_content)
-                content_parts.append({"type": "text", "text": content})
+                if content:
+                    content_parts.append({"type": "text", "text": content})
 
                 if msg.tool_calls:
                     for tc in msg.tool_calls:
@@ -59,7 +60,8 @@ class AnthropicModel(Model):
                             "input": tc.arguments,
                         })
 
-                result.append({"role": "assistant", "content": content_parts})
+                if content_parts:
+                    result.append({"role": "assistant", "content": content_parts})
 
             elif msg.role == "tool":
                 if result and result[-1]["role"] == "user":
@@ -79,7 +81,7 @@ class AnthropicModel(Model):
                     })
 
             elif msg.role == "user":
-                result.append({"role": "user", "content": [{"type": "text", "text": msg.content or ""}]})
+                result.append({"role": "user", "content": [{"type": "text", "text": msg.content or "(no content)"}]})
 
         return system_prompt, result
 
