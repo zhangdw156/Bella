@@ -2,3 +2,4 @@ __pycache__/
 session.db
 results/
 run_case.py
+replay.db
