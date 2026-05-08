@@ -57,7 +57,7 @@ The ReactAgent's system prompt is assembled from two blocks at runtime:
 
 Final system prompt = `common_block + "\n\n" + category_block`
 
-Both blocks are benchmark-controlled — users cannot modify them. Temperature is fixed at 1.
+Both blocks are benchmark-controlled — users cannot modify them. Temperature defaults to 1.0 but is user-configurable.
 
 ```python
 class ReactAgent(BaseAgent):

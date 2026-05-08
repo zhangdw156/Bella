@@ -17,7 +17,7 @@ model:
   base_url: "http://localhost:8000/v1"
   api_key: "xxx"
   adapter: null                   # Path to custom ModelAdapter file (null = use default)
-  temperature: 1                  # Fixed at 1 (not configurable, see below)
+  temperature: 1.0                # Default 1.0, user-configurable
 
 # User agent (globally fixed by benchmark for fairness)
 user_agent:
@@ -134,12 +134,13 @@ The adapter file is dynamically loaded at startup. The class must be named `Adap
 
 ## Temperature
 
-BELLA forces `temperature=1` for all model calls. This is **not configurable**.
+BELLA defaults to `temperature=1.0`, but users may override it via config (`model.temperature`).
 
-Rationale:
+Default rationale:
 - Thinking/reasoning models require `temperature=1`.
-- The `pass@k` and `pass^k` metrics are designed to measure model reliability under stochastic sampling. Forcing `temperature=0` would eliminate this signal.
-- Benchmarks that force `temperature=0` sacrifice the ability to distinguish a model that reliably solves a task from one that occasionally gets lucky.
+- The `pass@k` and `pass^k` metrics are designed to measure model reliability under stochastic sampling.
+
+Users may set a different temperature if their model performs better at another value. The chosen temperature is recorded in `summary.json` for reproducibility.
 
 ## System Prompt
 
