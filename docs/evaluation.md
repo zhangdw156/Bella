@@ -52,12 +52,12 @@ bella run model.name=GPT-4.1 model.provider=openai model.model_id=gpt-4.1 \
 bella run model.adapter=adapters/my_model.py
 
 # Subset selection (see below)
-bella run subset=bfcl
-bella run subset=bfcl/base
-bella run subset="bfcl/base,tau2/airline"
+bella run subset=bfclv4_multi
+bella run subset=bfclv4_multi_base
+bella run subset="bfclv4_multi_base,tau2_airline"
 
 # Count per category
-bella run subset=bfcl count=5
+bella run subset=bfclv4_multi count=5
 
 # pass@k evaluation
 bella run n=4
@@ -66,36 +66,47 @@ bella run n=4
 bella run workers=8
 
 # Combined
-bella run subset="bfcl,tau2" count=10 n=4 workers=8
+bella run subset="bfclv4_multi,tau2" count=10 n=4 workers=8
 ```
 
 ## Case Selection
 
-Cases are organized in a two-level category hierarchy: `level1/level2`.
+Cases are categorized using underscore-separated hierarchical names. The `subset` parameter performs **prefix matching** — specifying a prefix selects all categories that start with it.
 
 ### Category Map
 
-| Level 1 | Level 2 | Description |
-|---------|---------|-------------|
-| `bfcl` | `base` | Multi-turn with complete information |
-| `bfcl` | `miss_func` | Functions held out to test error recognition |
-| `bfcl` | `miss_param` | Parameters must be inferred from context |
-| `bfcl` | `long_context` | Large datasets to test information filtering |
-| `mcpmark` | `filesystem` | File system operations |
-| `mcpmark` | `postgres` | Database operations |
-| `tau2` | `airline` | Airline booking, cancellation, modification |
-| `tau2` | `retail` | Retail order management, returns, exchanges |
-| `astra` | `{env_name}` | Astra-constructed environments (e.g., `travel_booking`) |
+| Category | Cases | Description |
+|----------|-------|-------------|
+| `bfclv4_multi_base` | 25 | Multi-turn with complete information |
+| `bfclv4_multi_miss_func` | 25 | Functions held out to test error recognition |
+| `bfclv4_multi_miss_param` | 25 | Parameters must be inferred from context |
+| `bfclv4_multi_long_context` | 25 | Large datasets to test information filtering |
+| `mcpmark_filesystem` | ~20 | File system operations |
+| `mcpmark_postgres` | ~20 | Database operations |
+| `tau2_airline` | ~25 | Airline booking, cancellation, modification |
+| `tau2_retail` | ~25 | Retail order management, returns, exchanges |
+| `astra_{env_name}` | TBD | Astra-constructed environments |
+
+### Prefix Matching
+
+| `subset=` | Matches | Total |
+|-----------|---------|-------|
+| `all` | Everything | ~200 |
+| `bfclv4_multi` | All 4 BFCL multi-turn subsets | 100 |
+| `bfclv4_multi_base` | Only base subset | 25 |
+| `mcpmark` | filesystem + postgres | ~40 |
+| `tau2` | airline + retail | ~50 |
+| `"bfclv4_multi_base,tau2_airline"` | Two specific subsets | ~50 |
 
 ### Selection Rules
 
 - `subset=all` — run all cases (default).
-- `subset=bfcl` — run all cases under `bfcl/*`.
-- `subset=bfcl/base` — run only `bfcl/base` cases.
-- `subset="bfcl/base,tau2/airline"` — run cases from both categories.
-- `count=5` — limit to 5 cases **per selected level-2 category**. Cases are sampled deterministically (sorted by `case_id`, take first N).
+- `subset=bfclv4_multi` — prefix match: all categories starting with `bfclv4_multi`.
+- `subset=bfclv4_multi_base` — exact match: only this category.
+- `subset="bfclv4_multi_base,tau2_airline"` — comma-separated: multiple prefixes.
+- `count=5` — limit to 5 cases **per matched leaf category**. Cases are sampled deterministically (sorted by `case_id`, take first N).
 
-When `subset=bfcl` and `count=5`: runs 5 cases from each of `bfcl/base`, `bfcl/miss_func`, `bfcl/miss_param`, `bfcl/long_context` (20 total).
+When `subset=bfclv4_multi` and `count=5`: runs 5 cases from each of the 4 BFCL subsets (20 total).
 
 ## Model Adapter
 
@@ -147,15 +158,13 @@ Where `n` = total runs, `c` = number of passing runs, `k` = attempts.
 ```
 results/{model_name}/
 ├── run_1/
-│   ├── bfcl/
-│   │   ├── base/
-│   │   │   ├── bfcl_base_001.json
-│   │   │   └── ...
-│   │   └── miss_func/
-│   │       └── ...
-│   ├── tau2/
-│   │   └── airline/
-│   │       └── ...
+│   ├── bfclv4_multi_base/
+│   │   ├── bfclv4_multi_base_001.json
+│   │   └── ...
+│   ├── bfclv4_multi_miss_func/
+│   │   └── ...
+│   ├── tau2_airline/
+│   │   └── ...
 │   └── ...
 ├── run_2/                          # Only when n > 1
 │   └── ...
@@ -167,7 +176,7 @@ results/{model_name}/
 ```json
 {
   "case_id": "bfcl_base_001",
-  "category": "bfcl/base",
+  "category": "bfclv4_multi_base",
   "env_name": "gorilla_fs_twitter",
   "model": "Qwen3-8B",
   "interaction_mode": "fixed",
@@ -204,10 +213,10 @@ results/{model_name}/
       "pass^4": 0.51
     },
     "by_category": {
-      "bfcl/base": {"pass@1": 0.80, "pass@4": 0.95, "pass^4": 0.60},
-      "bfcl/miss_func": {"pass@1": 0.65, "pass@4": 0.82, "pass^4": 0.42},
-      "tau2/airline": {"pass@1": 0.70, "pass@4": 0.88, "pass^4": 0.48},
-      "mcpmark/filesystem": {"pass@1": 0.75, "pass@4": 0.90, "pass^4": 0.55}
+      "bfclv4_multi_base": {"pass@1": 0.80, "pass@4": 0.95, "pass^4": 0.60},
+      "bfclv4_multi_miss_func": {"pass@1": 0.65, "pass@4": 0.82, "pass^4": 0.42},
+      "tau2_airline": {"pass@1": 0.70, "pass@4": 0.88, "pass^4": 0.48},
+      "mcpmark_filesystem": {"pass@1": 0.75, "pass@4": 0.90, "pass^4": 0.55}
     },
     "by_mode": {
       "fixed": {"pass@1": 0.74},

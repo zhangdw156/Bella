@@ -57,7 +57,7 @@ bella/
 |-------|------|----------|-------------|
 | `case_id` | string | yes | Unique identifier across the entire benchmark. |
 | `env_name` | string | yes | Name of the environment directory this case runs in. |
-| `category` | string | yes | Two-level classification in `"level1/level2"` format (e.g., `"bfcl/base"`, `"tau2/airline"`). Used for subset selection during evaluation. |
+| `category` | string | yes | Underscore-separated hierarchical category (e.g., `"bfclv4_multi_base"`, `"tau2_airline"`). Used for prefix-based subset selection during evaluation. |
 | `source` | string | yes | Origin of this case: `"bfcl"`, `"mcpmark"`, `"tau2"`, or `"astra"`. |
 | `tags` | string[] | no | Categorization tags (e.g., `["booking", "multi-step"]`). |
 
@@ -163,7 +163,7 @@ Learned from Astra's token substitution issue:
 {
   "case_id": "bfcl_base_001",
   "env_name": "gorilla_fs_twitter",
-  "category": "bfcl/base",
+  "category": "bfclv4_multi_base",
   "source": "bfcl",
   "tags": ["file-ops", "social-media"],
   "interaction_mode": "fixed",
@@ -195,7 +195,7 @@ Learned from Astra's token substitution issue:
 {
   "case_id": "mcpmark_fs_merge_001",
   "env_name": "filesystem_ops",
-  "category": "mcpmark/filesystem",
+  "category": "mcpmark_filesystem",
   "source": "mcpmark",
   "tags": ["file-merging"],
   "interaction_mode": "fixed",
@@ -219,7 +219,7 @@ Learned from Astra's token substitution issue:
 {
   "case_id": "tau2_airline_001",
   "env_name": "airline",
-  "category": "tau2/airline",
+  "category": "tau2_airline",
   "source": "tau2",
   "tags": ["cancellation", "policy-compliance"],
   "interaction_mode": "dynamic",
@@ -248,7 +248,7 @@ Learned from Astra's token substitution issue:
 {
   "case_id": "astra_travel_001",
   "env_name": "travel_booking",
-  "category": "astra/travel_booking",
+  "category": "astra_travel_booking",
   "source": "astra",
   "tags": ["booking", "implicit-chain"],
   "interaction_mode": "dynamic",
