@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from anthropic import Anthropic
 
@@ -10,18 +9,11 @@ from bella.model.base import Model, ModelAdapter
 
 
 class AnthropicAdapter:
-    def is_tool_call(self, response: Any) -> bool:
-        return any(block.type == "tool_use" for block in response.content)
+    def parse_reasoning(self, content: str) -> tuple[str, str | None]:
+        return content, None
 
-    def parse_tool_call(self, response: Any) -> list[dict]:
-        return [
-            {"name": block.name, "arguments": block.input, "id": block.id}
-            for block in response.content if block.type == "tool_use"
-        ]
-
-    def parse_reasoning(self, response: Any) -> str | None:
-        thinking = [block.thinking for block in response.content if block.type == "thinking"]
-        return "\n".join(thinking) if thinking else None
+    def parse_tool_call(self, content: str) -> tuple[str, list[dict] | None]:
+        return content, None
 
     def format_reasoning(self, content: str, reasoning_content: str) -> str:
         return content
@@ -118,13 +110,30 @@ class AnthropicModel(Model):
 
         response = self._client.messages.create(**kwargs)
 
+        # Protocol-level extraction
         text_parts = [block.text for block in response.content if block.type == "text"]
-        content = "\n".join(text_parts) if text_parts else None
-        reasoning_content = self.adapter.parse_reasoning(response)
+        content = "\n".join(text_parts) if text_parts else ""
+        thinking = [block.thinking for block in response.content if block.type == "thinking"]
+        sdk_reasoning = "\n".join(thinking) if thinking else None
+        sdk_tool_calls = [block for block in response.content if block.type == "tool_use"]
+
+        # Adapter fallback for reasoning
+        if sdk_reasoning:
+            reasoning_content = sdk_reasoning
+        else:
+            content, reasoning_content = self.adapter.parse_reasoning(content)
+
+        # Adapter fallback for tool calls
         tool_calls = None
-        if self.adapter.is_tool_call(response):
-            parsed = self.adapter.parse_tool_call(response)
-            tool_calls = [ToolCall(name=tc["name"], arguments=tc["arguments"], id=tc["id"]) for tc in parsed]
+        if sdk_tool_calls:
+            tool_calls = [
+                ToolCall(name=block.name, arguments=block.input, id=block.id)
+                for block in sdk_tool_calls
+            ]
+        else:
+            content, parsed_tool_calls = self.adapter.parse_tool_call(content)
+            if parsed_tool_calls:
+                tool_calls = [ToolCall(name=tc["name"], arguments=tc["arguments"], id=tc["id"]) for tc in parsed_tool_calls]
 
         token_usage = None
         if response.usage:

@@ -1,28 +1,30 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from bella.types import Message
 
 
 @runtime_checkable
 class ModelAdapter(Protocol):
-    def is_tool_call(self, response: Any) -> bool: ...
-
-    def parse_tool_call(self, response: Any) -> list[dict]:
-        """Extract tool calls from the raw response.
-        Returns: [{"name": "...", "arguments": {...}, "id": "..."}]
+    def parse_reasoning(self, content: str) -> tuple[str, str | None]:
+        """Fallback: extract reasoning from content when SDK-level extraction fails.
+        Returns (cleaned_content, reasoning_content).
+        Inverse of format_reasoning.
         """
         ...
 
-    def parse_reasoning(self, response: Any) -> str | None: ...
+    def parse_tool_call(self, content: str) -> tuple[str, list[dict] | None]:
+        """Fallback: extract tool calls from content when SDK-level extraction fails.
+        Returns (cleaned_content, tool_calls).
+        tool_calls format: [{"name": "...", "arguments": {...}, "id": "..."}]
+        """
+        ...
 
     def format_reasoning(self, content: str, reasoning_content: str) -> str:
-        """Format reasoning_content for feeding back into subsequent LLM calls.
-        Default adapters may return content only (ignoring reasoning_content)
-        if the model does not support reasoning in input.
-        Custom adapters (e.g., Qwen3) wrap reasoning in model-specific tags.
+        """Combine content and reasoning_content for feeding back to the model.
+        Inverse of parse_reasoning.
         """
         ...
 
@@ -34,9 +36,7 @@ class ModelAdapter(Protocol):
         ...
 
     def extra_params(self) -> dict:
-        """Extra parameters to merge into the API call.
-        E.g., {"extra_body": {"enable_thinking": True}} for Qwen3.
-        """
+        """Extra parameters to merge into the API call."""
         ...
 
 

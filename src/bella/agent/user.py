@@ -9,7 +9,39 @@ from bella.agent.base import Agent
 from bella.compaction.base import ContextCompactor
 
 
-DONE_SIGNAL = "[DONE]"
+DONE_MARKER = "[DONE]"
+
+_SYSTEM_TEMPLATE = """\
+You simulate a real user in a multi-turn dialogue with a customer service assistant.
+
+## Your Persona
+Role: {role}
+Personality: {personality}
+Knowledge boundary: {knowledge_boundary}
+
+## Your Goal
+{demand}
+
+## Rules
+- Stay fully in character. Use vocabulary and tone natural to your persona.
+- Do NOT use tool names, API endpoints, parameter names, or system internals.
+- Respond to the assistant's questions based on what your persona would know.
+- If the assistant asks for information outside your knowledge boundary, say you don't know.
+- When the assistant has fully completed your goal, output exactly: {done_marker}
+- If the assistant cannot do what you asked and there is no way forward, output: {done_marker}
+- Do NOT output {done_marker} until the goal is genuinely resolved or clearly impossible.
+- Keep messages to 1-3 sentences. No markdown, no bullet points, no labels.
+
+## Critical: Reveal Information Gradually
+- In your FIRST message, only mention your primary reason for calling and give just \
+enough context for the assistant to start helping (e.g. your name, that you need help \
+with a booking). Do NOT list all your requests upfront.
+- Reveal additional requests and specific details (dates, names, amounts) only when the \
+assistant asks or after the current issue is resolved.
+- A real person does not open a call by listing every single thing they need in one \
+breath — they start with the most important thing and bring up the rest as the \
+conversation progresses.
+"""
 
 
 @dataclass
@@ -34,29 +66,19 @@ class UserAgent(Agent):
         return UserDefaultCompactor()
 
     def _build_system_prompt(self, demand: str, user_agent_config: dict) -> str:
-        role = user_agent_config.get("role", "")
-        personality = user_agent_config.get("personality", "")
-        knowledge_boundary = user_agent_config.get("knowledge_boundary", "")
-
-        return (
-            f"You are simulating a user interacting with a customer service agent.\n\n"
-            f"## Your Role\n{role}\n\n"
-            f"## Your Personality\n{personality}\n\n"
-            f"## What You Know\n{knowledge_boundary}\n\n"
-            f"## Your Goal\n{demand}\n\n"
-            f"## Rules\n"
-            f"- Reveal information gradually. Your first message should state only your primary need.\n"
-            f"- If asked about something you don't know, say you don't know or give a vague answer.\n"
-            f"- When your goal is achieved, impossible, or the agent transfers you to a human, "
-            f"end your message with {DONE_SIGNAL}\n"
-            f"- Stay in character. Do not break the fourth wall.\n"
+        return _SYSTEM_TEMPLATE.format(
+            role=user_agent_config.get("role", "a user"),
+            personality=user_agent_config.get("personality", ""),
+            knowledge_boundary=user_agent_config.get("knowledge_boundary", ""),
+            demand=demand,
+            done_marker=DONE_MARKER,
         )
 
     def _parse_response(self, response: Message) -> UserTurnResult:
-        content = response.content or ""
-        is_done = DONE_SIGNAL in content
-        message = content.replace(DONE_SIGNAL, "").strip()
-        return UserTurnResult(message=message, is_done=is_done)
+        raw = response.content or ""
+        is_done = DONE_MARKER in raw
+        cleaned = raw.replace(DONE_MARKER, "").strip()
+        return UserTurnResult(message=cleaned, is_done=is_done)
 
     def start(self, demand: str, user_agent_config: dict) -> UserTurnResult:
         """Initialize memory and generate the first user message."""
@@ -64,7 +86,14 @@ class UserAgent(Agent):
         self.memory = UserMemory(system_prompt=system_prompt)
 
         messages = self.memory.to_messages()
-        messages.append(Message(role="user", content="Begin the conversation. State your need."))
+        messages.append(Message(
+            role="user",
+            content=(
+                "The conversation is starting now. Generate your first "
+                "message to the assistant. Mention only your most "
+                "immediate need — do not list everything upfront."
+            ),
+        ))
 
         response = self.model.generate(messages)
 

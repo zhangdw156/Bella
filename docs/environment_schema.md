@@ -93,8 +93,7 @@ class EnvironmentBackend:
             arguments: Tool arguments as a dict.
 
         Returns:
-            Success: {"success": True, "data": {...}}
-            Error:   {"success": False, "error": {"code": "...", "message": "..."}}
+            dict: Tool result on success, {"error": "..."} on failure.
         """
         ...
 ```

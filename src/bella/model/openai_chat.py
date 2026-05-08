@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from openai import OpenAI
 
@@ -10,17 +9,11 @@ from bella.model.base import Model, ModelAdapter
 
 
 class OpenAIChatAdapter:
-    def is_tool_call(self, response: Any) -> bool:
-        return response.choices[0].message.tool_calls is not None
+    def parse_reasoning(self, content: str) -> tuple[str, str | None]:
+        return content, None
 
-    def parse_tool_call(self, response: Any) -> list[dict]:
-        return [
-            {"name": tc.function.name, "arguments": json.loads(tc.function.arguments), "id": tc.id}
-            for tc in response.choices[0].message.tool_calls
-        ]
-
-    def parse_reasoning(self, response: Any) -> str | None:
-        return getattr(response.choices[0].message, "reasoning_content", None)
+    def parse_tool_call(self, content: str) -> tuple[str, list[dict] | None]:
+        return content, None
 
     def format_reasoning(self, content: str, reasoning_content: str) -> str:
         return content
@@ -100,12 +93,28 @@ class OpenAIChatModel(Model):
 
         response = self._client.chat.completions.create(**kwargs)
 
-        content = response.choices[0].message.content
-        reasoning_content = self.adapter.parse_reasoning(response)
+        # Protocol-level extraction
+        content = response.choices[0].message.content or ""
+        sdk_reasoning = getattr(response.choices[0].message, "reasoning_content", None)
+        sdk_tool_calls = response.choices[0].message.tool_calls
+
+        # Adapter fallback for reasoning
+        if sdk_reasoning:
+            reasoning_content = sdk_reasoning
+        else:
+            content, reasoning_content = self.adapter.parse_reasoning(content)
+
+        # Adapter fallback for tool calls
         tool_calls = None
-        if self.adapter.is_tool_call(response):
-            parsed = self.adapter.parse_tool_call(response)
-            tool_calls = [ToolCall(name=tc["name"], arguments=tc["arguments"], id=tc["id"]) for tc in parsed]
+        if sdk_tool_calls:
+            tool_calls = [
+                ToolCall(name=tc.function.name, arguments=json.loads(tc.function.arguments), id=tc.id)
+                for tc in sdk_tool_calls
+            ]
+        else:
+            content, parsed_tool_calls = self.adapter.parse_tool_call(content)
+            if parsed_tool_calls:
+                tool_calls = [ToolCall(name=tc["name"], arguments=tc["arguments"], id=tc["id"]) for tc in parsed_tool_calls]
 
         token_usage = None
         if response.usage:
