@@ -7,6 +7,7 @@ import importlib.util
 import json
 import shutil
 import sqlite3
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -96,80 +97,80 @@ class ReplayRunner:
 
         env_dir = self.environments_dir / env_name
 
-        # Copy world.db → replay.db
+        tmp_dir = Path(tempfile.mkdtemp(prefix=f"bella_replay_{env_name}_"))
         world_db = env_dir / "world" / "world.db"
-        replay_db = env_dir / "world" / "replay.db"
+        replay_db = tmp_dir / "replay.db"
         shutil.copy2(world_db, replay_db)
 
-        # Execute world_setup SQL
-        if world_setup:
+        try:
+            # Execute world_setup SQL
+            if world_setup:
+                conn = sqlite3.connect(str(replay_db))
+                for sql in world_setup:
+                    conn.execute(sql)
+                conn.commit()
+                conn.close()
+
+            # Load backend
+            backend_path = env_dir / "runtime" / "backend.py"
+            backend = _load_backend(backend_path, replay_db)
+
+            # Replay tool calls with token substitution
+            token_map: dict[str, str] = {}
+            matched = 0
+            mismatched = 0
+            substitutions = 0
+
+            for tc in tool_calls:
+                patched_args = _substitute_tokens(tc["arguments"], token_map)
+                if patched_args != tc["arguments"]:
+                    substitutions += 1
+
+                replay_result = backend.call(tc["name"], patched_args)
+
+                orig_token = _extract_token(tc.get("result"))
+                replay_token = _extract_token(replay_result)
+                if orig_token and replay_token and orig_token != replay_token:
+                    token_map[orig_token] = replay_token
+
+                original_json = json.dumps(tc.get("result"), sort_keys=True, ensure_ascii=False)
+                replay_json = json.dumps(replay_result, sort_keys=True, ensure_ascii=False)
+                if original_json == replay_json:
+                    matched += 1
+                else:
+                    mismatched += 1
+
+            # Verify SQL
+            verify_results: list[VerifyResult] = []
             conn = sqlite3.connect(str(replay_db))
-            for sql in world_setup:
-                conn.execute(sql)
-            conn.commit()
+
+            for v in verify:
+                sql = v["sql"]
+                expected = v["expected"]
+                order_matters = v.get("order_matters", False)
+
+                cursor = conn.execute(sql)
+                actual = [list(row) for row in cursor.fetchall()]
+
+                passed = _compare_results(expected, actual, order_matters)
+                verify_results.append(VerifyResult(
+                    sql=sql,
+                    expected=expected,
+                    actual=actual,
+                    passed=passed,
+                ))
+
             conn.close()
 
-        # Load backend
-        backend_path = env_dir / "runtime" / "backend.py"
-        backend = _load_backend(backend_path, replay_db)
+            all_passed = all(vr.passed for vr in verify_results)
 
-        # Replay tool calls with token substitution
-        token_map: dict[str, str] = {}
-        matched = 0
-        mismatched = 0
-        substitutions = 0
-
-        for tc in tool_calls:
-            patched_args = _substitute_tokens(tc["arguments"], token_map)
-            if patched_args != tc["arguments"]:
-                substitutions += 1
-
-            replay_result = backend.call(tc["name"], patched_args)
-
-            orig_token = _extract_token(tc.get("result"))
-            replay_token = _extract_token(replay_result)
-            if orig_token and replay_token and orig_token != replay_token:
-                token_map[orig_token] = replay_token
-
-            original_json = json.dumps(tc.get("result"), sort_keys=True, ensure_ascii=False)
-            replay_json = json.dumps(replay_result, sort_keys=True, ensure_ascii=False)
-            if original_json == replay_json:
-                matched += 1
-            else:
-                mismatched += 1
-
-        # Verify SQL
-        verify_results: list[VerifyResult] = []
-        conn = sqlite3.connect(str(replay_db))
-
-        for v in verify:
-            sql = v["sql"]
-            expected = v["expected"]
-            order_matters = v.get("order_matters", False)
-
-            cursor = conn.execute(sql)
-            actual = [list(row) for row in cursor.fetchall()]
-
-            passed = _compare_results(expected, actual, order_matters)
-            verify_results.append(VerifyResult(
-                sql=sql,
-                expected=expected,
-                actual=actual,
-                passed=passed,
-            ))
-
-        conn.close()
-
-        # Clean up replay.db
-        replay_db.unlink(missing_ok=True)
-
-        all_passed = all(vr.passed for vr in verify_results)
-
-        return ReplayResult(
-            total_calls=len(tool_calls),
-            matched=matched,
-            mismatched=mismatched,
-            token_substitutions=substitutions,
-            verify_results=verify_results,
-            passed=all_passed,
-        )
+            return ReplayResult(
+                total_calls=len(tool_calls),
+                matched=matched,
+                mismatched=mismatched,
+                token_substitutions=substitutions,
+                verify_results=verify_results,
+                passed=all_passed,
+            )
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)

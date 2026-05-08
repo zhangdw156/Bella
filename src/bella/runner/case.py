@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import importlib.util
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,13 +45,16 @@ class CaseRunner:
         self.category_prompts = category_prompts or {}
         self.max_turns = max_turns
 
-    def _load_environment(self, env_name: str, world_setup: list[str]) -> tuple[Any, list[dict]]:
-        """Load backend and tools for the given environment."""
+    def _load_environment(self, env_name: str, world_setup: list[str]) -> tuple[Any, list[dict], Path]:
+        """Load backend and tools for the given environment.
+
+        Returns (backend, tools, tmp_dir) — caller must clean up tmp_dir.
+        """
         env_dir = self.environments_dir / env_name
 
-        # Copy world.db → session.db
+        tmp_dir = Path(tempfile.mkdtemp(prefix=f"bella_{env_name}_"))
         world_db = env_dir / "world" / "world.db"
-        session_db = env_dir / "world" / "session.db"
+        session_db = tmp_dir / "session.db"
         shutil.copy2(world_db, session_db)
 
         # Execute world_setup SQL
@@ -76,7 +80,7 @@ class CaseRunner:
             for line in f:
                 tools.append(json.loads(line))
 
-        return backend, tools
+        return backend, tools, tmp_dir
 
     def _build_system_prompt(self, category: str) -> str:
         return self.category_prompts.get(category)
@@ -111,62 +115,65 @@ class CaseRunner:
 
         start_time = time.time()
 
-        backend, tools = self._load_environment(env_name, world_setup)
-        category_prompt = self._build_system_prompt(category)
-        self.react_agent.init_memory(extra_system_prompt=category_prompt)
+        backend, tools, tmp_dir = self._load_environment(env_name, world_setup)
+        try:
+            category_prompt = self._build_system_prompt(category)
+            self.react_agent.init_memory(extra_system_prompt=category_prompt)
 
-        total_token_usage: TokenUsage | None = None
-        ended_normally = False
+            total_token_usage: TokenUsage | None = None
+            ended_normally = False
 
-        if interaction_mode == "fixed":
-            user_demands = case["user_demands"]
-            for user_msg in user_demands:
-                result = self.react_agent.run_turn(user_msg, tools, backend)
-                if result.token_usage:
-                    if total_token_usage is None:
-                        total_token_usage = result.token_usage
-                    else:
-                        total_token_usage = TokenUsage(
-                            input_tokens=total_token_usage.input_tokens + result.token_usage.input_tokens,
-                            output_tokens=total_token_usage.output_tokens + result.token_usage.output_tokens,
-                        )
-            ended_normally = True
+            if interaction_mode == "fixed":
+                user_demands = case["user_demands"]
+                for user_msg in user_demands:
+                    result = self.react_agent.run_turn(user_msg, tools, backend)
+                    if result.token_usage:
+                        if total_token_usage is None:
+                            total_token_usage = result.token_usage
+                        else:
+                            total_token_usage = TokenUsage(
+                                input_tokens=total_token_usage.input_tokens + result.token_usage.input_tokens,
+                                output_tokens=total_token_usage.output_tokens + result.token_usage.output_tokens,
+                            )
+                ended_normally = True
 
-        elif interaction_mode == "dynamic":
-            assert self.user_agent is not None
-            demand = case["demand"]
-            user_agent_config = case["user_agent_config"]
+            elif interaction_mode == "dynamic":
+                assert self.user_agent is not None
+                demand = case["demand"]
+                user_agent_config = case["user_agent_config"]
 
-            user_result = self.user_agent.start(demand, user_agent_config)
-            turn_count = 0
+                user_result = self.user_agent.start(demand, user_agent_config)
+                turn_count = 0
 
-            while not user_result.is_done and turn_count < self.max_turns:
-                result = self.react_agent.run_turn(user_result.message, tools, backend)
-                if result.token_usage:
-                    if total_token_usage is None:
-                        total_token_usage = result.token_usage
-                    else:
-                        total_token_usage = TokenUsage(
-                            input_tokens=total_token_usage.input_tokens + result.token_usage.input_tokens,
-                            output_tokens=total_token_usage.output_tokens + result.token_usage.output_tokens,
-                        )
-                user_result = self.user_agent.respond(result.assistant_message)
-                turn_count += 1
+                while not user_result.is_done and turn_count < self.max_turns:
+                    result = self.react_agent.run_turn(user_result.message, tools, backend)
+                    if result.token_usage:
+                        if total_token_usage is None:
+                            total_token_usage = result.token_usage
+                        else:
+                            total_token_usage = TokenUsage(
+                                input_tokens=total_token_usage.input_tokens + result.token_usage.input_tokens,
+                                output_tokens=total_token_usage.output_tokens + result.token_usage.output_tokens,
+                            )
+                    user_result = self.user_agent.respond(result.assistant_message)
+                    turn_count += 1
 
-            ended_normally = user_result.is_done
+                ended_normally = user_result.is_done
 
-        end_time = time.time()
+            end_time = time.time()
 
-        return CaseResult(
-            case_id=case_id,
-            env_name=env_name,
-            category=category,
-            interaction_mode=interaction_mode,
-            react_model_config=self.react_agent.model.to_config(),
-            user_model_config=self.user_agent.model.to_config() if self.user_agent else None,
-            messages=self._collect_messages(),
-            tool_calls=self._collect_tool_calls(),
-            token_usage=total_token_usage,
-            timing=Timing(start_time=start_time, end_time=end_time),
-            ended_normally=ended_normally,
-        )
+            return CaseResult(
+                case_id=case_id,
+                env_name=env_name,
+                category=category,
+                interaction_mode=interaction_mode,
+                react_model_config=self.react_agent.model.to_config(),
+                user_model_config=self.user_agent.model.to_config() if self.user_agent else None,
+                messages=self._collect_messages(),
+                tool_calls=self._collect_tool_calls(),
+                token_usage=total_token_usage,
+                timing=Timing(start_time=start_time, end_time=end_time),
+                ended_normally=ended_normally,
+            )
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
