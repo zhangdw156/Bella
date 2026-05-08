@@ -54,7 +54,7 @@ bella run model.adapter=adapters/my_model.py
 # Subset selection (see below)
 bella run subset=bfclv4_multi
 bella run subset=bfclv4_multi_base
-bella run subset="bfclv4_multi_base,tau2_airline"
+bella run subset="bfclv4_multi_base,tau3_airline"
 
 # Count per category
 bella run subset=bfclv4_multi count=5
@@ -66,7 +66,7 @@ bella run n=4
 bella run workers=8
 
 # Combined
-bella run subset="bfclv4_multi,tau2" count=10 n=4 workers=8
+bella run subset="bfclv4_multi,tau3" count=10 n=4 workers=8
 ```
 
 ## Case Selection
@@ -83,8 +83,8 @@ Cases are categorized using underscore-separated hierarchical names. The `subset
 | `bfclv4_multi_long_context` | 25 | Large datasets to test information filtering |
 | `mcpmark_filesystem` | ~20 | File system operations |
 | `mcpmark_postgres` | ~20 | Database operations |
-| `tau2_airline` | ~25 | Airline booking, cancellation, modification |
-| `tau2_retail` | ~25 | Retail order management, returns, exchanges |
+| `tau3_airline` | ~25 | Airline booking, cancellation, modification |
+| `tau3_retail` | ~25 | Retail order management, returns, exchanges |
 | `astra_{env_name}` | TBD | Astra-constructed environments |
 
 ### Prefix Matching
@@ -95,15 +95,15 @@ Cases are categorized using underscore-separated hierarchical names. The `subset
 | `bfclv4_multi` | All 4 BFCL multi-turn subsets | 100 |
 | `bfclv4_multi_base` | Only base subset | 25 |
 | `mcpmark` | filesystem + postgres | ~40 |
-| `tau2` | airline + retail | ~50 |
-| `"bfclv4_multi_base,tau2_airline"` | Two specific subsets | ~50 |
+| `tau3` | airline + retail | ~50 |
+| `"bfclv4_multi_base,tau3_airline"` | Two specific subsets | ~50 |
 
 ### Selection Rules
 
 - `subset=all` — run all cases (default).
 - `subset=bfclv4_multi` — prefix match: all categories starting with `bfclv4_multi`.
 - `subset=bfclv4_multi_base` — exact match: only this category.
-- `subset="bfclv4_multi_base,tau2_airline"` — comma-separated: multiple prefixes.
+- `subset="bfclv4_multi_base,tau3_airline"` — comma-separated: multiple prefixes.
 - `count=5` — limit to 5 cases **per matched leaf category**. Cases are sampled deterministically (sorted by `case_id`, take first N).
 
 When `subset=bfclv4_multi` and `count=5`: runs 5 cases from each of the 4 BFCL subsets (20 total).
@@ -163,7 +163,7 @@ results/{model_name}/
 │   │   └── ...
 │   ├── bfclv4_multi_miss_func/
 │   │   └── ...
-│   ├── tau2_airline/
+│   ├── tau3_airline/
 │   │   └── ...
 │   └── ...
 ├── run_2/                          # Only when n > 1
@@ -215,7 +215,7 @@ results/{model_name}/
     "by_category": {
       "bfclv4_multi_base": {"pass@1": 0.80, "pass@4": 0.95, "pass^4": 0.60},
       "bfclv4_multi_miss_func": {"pass@1": 0.65, "pass@4": 0.82, "pass^4": 0.42},
-      "tau2_airline": {"pass@1": 0.70, "pass@4": 0.88, "pass^4": 0.48},
+      "tau3_airline": {"pass@1": 0.70, "pass@4": 0.88, "pass^4": 0.48},
       "mcpmark_filesystem": {"pass@1": 0.75, "pass@4": 0.90, "pass^4": 0.55}
     },
     "by_mode": {

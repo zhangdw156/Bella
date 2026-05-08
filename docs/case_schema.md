@@ -25,7 +25,7 @@ bella/
   "case_id": "string",
   "env_name": "string",
   "category": "string",
-  "source": "bfcl | mcpmark | tau2 | astra",
+  "source": "bfcl | mcpmark | tau3 | astra",
   "tags": ["string"],
 
   "interaction_mode": "fixed | dynamic",
@@ -57,8 +57,8 @@ bella/
 |-------|------|----------|-------------|
 | `case_id` | string | yes | Unique identifier across the entire benchmark. |
 | `env_name` | string | yes | Name of the environment directory this case runs in. |
-| `category` | string | yes | Underscore-separated hierarchical category (e.g., `"bfclv4_multi_base"`, `"tau2_airline"`). Used for prefix-based subset selection during evaluation. |
-| `source` | string | yes | Origin of this case: `"bfcl"`, `"mcpmark"`, `"tau2"`, or `"astra"`. |
+| `category` | string | yes | Underscore-separated hierarchical category (e.g., `"bfclv4_multi_base"`, `"tau3_airline"`). Used for prefix-based subset selection during evaluation. |
+| `source` | string | yes | Origin of this case: `"bfcl"`, `"mcpmark"`, `"tau3"`, or `"astra"`. |
 | `tags` | string[] | no | Categorization tags (e.g., `["booking", "multi-step"]`). |
 
 ### Interaction Mode
@@ -217,10 +217,10 @@ Learned from Astra's token substitution issue:
 
 ```json
 {
-  "case_id": "tau2_airline_001",
+  "case_id": "tau3_airline_001",
   "env_name": "airline",
-  "category": "tau2_airline",
-  "source": "tau2",
+  "category": "tau3_airline",
+  "source": "tau3",
   "tags": ["cancellation", "policy-compliance"],
   "interaction_mode": "dynamic",
   "demand": "Cancel the reservation from Philadelphia to LaGuardia.",
