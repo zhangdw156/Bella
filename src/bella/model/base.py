@@ -40,6 +40,9 @@ class ModelAdapter(Protocol):
         ...
 
 
+_COMPACTION_RATIO = 0.8
+
+
 class Model(ABC):
     def __init__(
         self,
@@ -47,13 +50,19 @@ class Model(ABC):
         base_url: str | None = None,
         api_key: str | None = None,
         temperature: float = 1.0,
+        max_context_tokens: int = 128000,
         adapter: ModelAdapter | None = None,
     ):
         self.model_id = model_id
         self.base_url = base_url
         self.api_key = api_key
         self.temperature = temperature
+        self.max_context_tokens = max_context_tokens
         self._adapter = adapter
+
+    @property
+    def compaction_threshold(self) -> int:
+        return int(self.max_context_tokens * _COMPACTION_RATIO)
 
     @property
     def adapter(self) -> ModelAdapter:

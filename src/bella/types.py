@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 
 @dataclass
@@ -39,3 +39,8 @@ class Message:
     tool_call_id: str | None = None
     reasoning_content: str | None = None
     token_usage: TokenUsage | None = None
+
+
+@runtime_checkable
+class Backend(Protocol):
+    def call(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
