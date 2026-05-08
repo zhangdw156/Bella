@@ -17,6 +17,7 @@ model:
   base_url: "http://localhost:8000/v1"
   api_key: "xxx"
   adapter: null                   # Path to custom ModelAdapter file (null = use default)
+  temperature: 1                  # Fixed at 1 (not configurable, see below)
 
 # User agent (globally fixed by benchmark for fairness)
 user_agent:
@@ -130,6 +131,42 @@ class Adapter:
 Specify via config: `model.adapter: adapters/my_model.py`
 
 The adapter file is dynamically loaded at startup. The class must be named `Adapter`.
+
+## Temperature
+
+BELLA forces `temperature=1` for all model calls. This is **not configurable**.
+
+Rationale:
+- Thinking/reasoning models require `temperature=1`.
+- The `pass@k` and `pass^k` metrics are designed to measure model reliability under stochastic sampling. Forcing `temperature=0` would eliminate this signal.
+- Benchmarks that force `temperature=0` sacrifice the ability to distinguish a model that reliably solves a task from one that occasionally gets lucky.
+
+## System Prompt
+
+The ReactAgent's system prompt is assembled from two blocks:
+
+1. **Common block**: a universal prompt defining the agent's basic behavioral rules (e.g., "You are a helpful assistant that uses tools to complete tasks. Do not fabricate information."). Shared across all cases.
+2. **Category block**: a category-specific prompt containing domain knowledge, business rules, and policies relevant to that category. For example, `tau3_airline` includes the airline's cancellation and refund policies.
+
+The final system prompt is: `common_block + category_block`.
+
+Both blocks are maintained by the benchmark — **users cannot modify or override them**. This ensures fair comparison across models.
+
+Prompt files are stored in the repository:
+
+```
+prompts/
+├── common.md                         # Universal agent instructions
+├── bfclv4_multi_base.md
+├── bfclv4_multi_miss_func.md
+├── bfclv4_multi_miss_param.md
+├── bfclv4_multi_long_context.md
+├── mcpmark_filesystem.md
+├── mcpmark_postgres.md
+├── tau3_airline.md
+├── tau3_retail.md
+└── astra_{env_name}.md
+```
 
 ## Metrics
 

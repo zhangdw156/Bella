@@ -48,6 +48,17 @@ Shared responsibilities:
 
 The agent that evaluates the model under test. Receives a `ModelAdapter` via composition.
 
+### System Prompt Assembly
+
+The ReactAgent's system prompt is assembled from two blocks at runtime:
+
+1. **Common block** (`prompts/common.md`): universal agent behavioral rules, shared across all cases.
+2. **Category block** (`prompts/{category}.md`): domain-specific business rules and policies for the case's category.
+
+Final system prompt = `common_block + "\n\n" + category_block`
+
+Both blocks are benchmark-controlled — users cannot modify them. Temperature is fixed at 1.
+
 ```python
 class ReactAgent(BaseAgent):
     def __init__(self, adapter: ModelAdapter, max_llm_calls: int = 12, **kwargs):
