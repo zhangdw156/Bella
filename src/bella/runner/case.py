@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from bella.types import Message, ToolCall, TokenUsage, Timing
+from bella.types import Message, ToolCall, TokenUsage, Timing, Case
 from bella.model.base import Model
 from bella.agent.react import ReactAgent, TurnResult
 from bella.agent.user import UserAgent, UserTurnResult
@@ -105,13 +105,13 @@ class CaseRunner:
             current_turn_index=len(self.react_agent.memory.turns) - 1
         )
 
-    def run(self, case: dict[str, Any]) -> CaseResult:
+    def run(self, case: Case) -> CaseResult:
         """Run a single case and return the result."""
-        case_id = case["case_id"]
-        env_name = case["env_name"]
-        category = case["category"]
-        interaction_mode = case["interaction_mode"]
-        world_setup = case.get("world_setup", [])
+        case_id = case.case_id
+        env_name = case.env_name
+        category = case.category
+        interaction_mode = case.interaction_mode
+        world_setup = case.world_setup
 
         start_time = time.time()
 
@@ -124,7 +124,7 @@ class CaseRunner:
             ended_normally = False
 
             if interaction_mode == "fixed":
-                user_demands = case["user_demands"]
+                user_demands = case.user_demands or []
                 for user_msg in user_demands:
                     result = self.react_agent.run_turn(user_msg, tools, backend)
                     if result.token_usage:
@@ -139,8 +139,12 @@ class CaseRunner:
 
             elif interaction_mode == "dynamic":
                 assert self.user_agent is not None
-                demand = case["demand"]
-                user_agent_config = case["user_agent_config"]
+                demand = case.demand
+                user_agent_config = {
+                    "role": case.user_agent_config.role,
+                    "personality": case.user_agent_config.personality,
+                    "knowledge_boundary": case.user_agent_config.knowledge_boundary,
+                } if case.user_agent_config else {}
 
                 user_result = self.user_agent.start(demand, user_agent_config)
                 turn_count = 0

@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from bella.types import Case
+
 
 @dataclass
 class VerifyResult:
@@ -81,7 +83,7 @@ class ReplayRunner:
     def __init__(self, environments_dir: Path = Path("environments")):
         self.environments_dir = environments_dir
 
-    def run(self, case: dict[str, Any], tool_calls: list[dict[str, Any]]) -> ReplayResult:
+    def run(self, case: Case, tool_calls: list[dict[str, Any]]) -> ReplayResult:
         """Replay tool calls on a fresh DB and verify results.
 
         Args:
@@ -91,9 +93,9 @@ class ReplayRunner:
         Returns:
             ReplayResult with replay stats and verification results.
         """
-        env_name = case["env_name"]
-        world_setup = case.get("world_setup", [])
-        verify = case.get("verify", [])
+        env_name = case.env_name
+        world_setup = case.world_setup
+        verify = [{"sql": v.sql, "expected": v.expected, "order_matters": v.order_matters} for v in case.verify]
 
         env_dir = self.environments_dir / env_name
 

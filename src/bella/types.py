@@ -1,4 +1,8 @@
-from dataclasses import dataclass
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 
@@ -44,3 +48,65 @@ class Message:
 @runtime_checkable
 class Backend(Protocol):
     def call(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
+
+
+@dataclass
+class UserAgentConfig:
+    role: str
+    personality: str
+    knowledge_boundary: str
+
+
+@dataclass
+class VerifySpec:
+    sql: str
+    expected: list[list]
+    order_matters: bool = False
+
+
+@dataclass
+class Case:
+    case_id: str
+    env_name: str
+    category: str
+    source: str
+    tags: list[str]
+    interaction_mode: Literal["fixed", "dynamic"]
+    demand: str | None = None
+    user_demands: list[str] | None = None
+    world_setup: list[str] = field(default_factory=list)
+    user_agent_config: UserAgentConfig | None = None
+    verify: list[VerifySpec] = field(default_factory=list)
+
+    @classmethod
+    def from_json(cls, path: Path) -> Case:
+        with open(path) as f:
+            data = json.load(f)
+        return cls._from_dict(data)
+
+    @classmethod
+    def load_dir(cls, cases_dir: Path, pattern: str = "*.json") -> list[Case]:
+        cases = []
+        for p in sorted(cases_dir.glob(pattern)):
+            cases.append(cls.from_json(p))
+        return cases
+
+    @classmethod
+    def _from_dict(cls, data: dict) -> Case:
+        uac = data.get("user_agent_config")
+        if uac is not None:
+            uac = UserAgentConfig(**uac)
+        verify = [VerifySpec(**v) for v in data.get("verify", [])]
+        return cls(
+            case_id=data["case_id"],
+            env_name=data["env_name"],
+            category=data["category"],
+            source=data["source"],
+            tags=data.get("tags", []),
+            interaction_mode=data["interaction_mode"],
+            demand=data.get("demand"),
+            user_demands=data.get("user_demands"),
+            world_setup=data.get("world_setup", []),
+            user_agent_config=uac,
+            verify=verify,
+        )
