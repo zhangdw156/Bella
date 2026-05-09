@@ -64,6 +64,11 @@ class VerifySpec:
     order_matters: bool = False
 
 
+# TODO: support case variants (inspired by BFCL v4):
+#   - miss_func: hide a tool in certain turns, test if agent recognizes the gap
+#   - miss_param: make user instructions vague in one turn, clarify in the next
+#   This lets one base case generate multiple test instances testing different abilities.
+
 @dataclass
 class Case:
     case_id: str
