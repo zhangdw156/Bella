@@ -67,6 +67,18 @@ class OpenAIChatModel(Model):
             result.append(d)
         return result
 
+    @staticmethod
+    def _fix_schema(schema: dict) -> dict:
+        """Add missing 'items' to array properties (required by OpenAI API)."""
+        if schema.get("type") == "array" and "items" not in schema:
+            schema = {**schema, "items": {"type": "object"}}
+        if "properties" in schema:
+            schema = {
+                **schema,
+                "properties": {k: OpenAIChatModel._fix_schema(v) for k, v in schema["properties"].items()},
+            }
+        return schema
+
     def _convert_tools(self, tools: list[dict]) -> list[dict]:
         return [
             {
@@ -74,7 +86,7 @@ class OpenAIChatModel(Model):
                 "function": {
                     "name": t["name"],
                     "description": t.get("description", ""),
-                    "parameters": t.get("inputSchema", {}),
+                    "parameters": self._fix_schema(t.get("inputSchema", {})),
                 },
             }
             for t in tools
