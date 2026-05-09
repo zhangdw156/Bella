@@ -10,6 +10,14 @@ from bella.agent.base import Agent
 from bella.compaction.base import ContextCompactor
 
 
+# TODO: Redesign system prompt for benchmark-specific needs.
+# Current prompt is adapted from Astra's assistant agent and may not be optimal.
+# Key areas to improve:
+# - Error recovery: models should autonomously retry after tool errors (e.g. lockDoors before startEngine)
+#   rather than asking the user for guidance, especially in fixed interaction mode.
+# - Model-agnostic: prompt should work well across models without model-specific patches like "ACT, don't announce".
+# - Self-sufficiency: stronger guidance that the model must complete the full task independently,
+#   since fixed-mode cases won't have follow-up user messages to nudge it along.
 _BASE_SYSTEM_PROMPT = """\
 You are an assistant operating in a tool-using multi-turn conversation.
 
