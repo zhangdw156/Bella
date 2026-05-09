@@ -39,6 +39,9 @@ def main():
         react_model=react_model,
         user_model=user_model,
         cases=cases,
+        # NOTE: n=4 is a good balance between discrimination and cost.
+        # Experiments (2026-05-10) showed pass@1 has the best per-case discrimination (117/148),
+        # pass^4 retains strong discrimination (108/148), while n=8 doubles cost with diminishing returns.
         n=4,
         concurrency=80,
         output_dir=output_dir,
