@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Evaluate mcpmark_postgres cases. n=4, concurrency=8, model=gpt-5.2."""
+
+import os
+import time
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from bella.model.openai_chat import OpenAIChatModel
+from bella.runner.bella import BellaRunner
+from bella.types import Case
+
+load_dotenv()
+
+
+def _make_model() -> OpenAIChatModel:
+    return OpenAIChatModel(
+        model_id="gpt-5.2",
+        base_url=os.environ.get("BELLA_BASE_URL"),
+        api_key=os.environ.get("BELLA_API_KEY"),
+        max_context_tokens=128000,
+    )
+
+
+def main():
+    cases = Case.load_dir(Path("cases"), pattern="mcpmark_postgres_*.json")
+    print(f"Loaded {len(cases)} mcpmark_postgres cases")
+
+    react_model = _make_model()
+    user_model = _make_model()
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    output_dir = Path(f"results/eval_mcpmark_postgres_{timestamp}")
+
+    runner = BellaRunner(
+        react_model=react_model,
+        user_model=user_model,
+        cases=cases,
+        n=4,
+        concurrency=8,
+        output_dir=output_dir,
+    )
+    result = runner.run()
+    result.print_summary()
+
+
+if __name__ == "__main__":
+    main()
