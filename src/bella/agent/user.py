@@ -12,7 +12,7 @@ from bella.compaction.base import ContextCompactor
 DONE_MARKER = "[DONE]"
 
 _SYSTEM_TEMPLATE = """\
-You simulate a real user in a multi-turn dialogue with a customer service assistant.
+You simulate a real user in a multi-turn dialogue with an AI assistant.
 
 ## Your Persona
 Role: {role}
@@ -25,22 +25,22 @@ Knowledge boundary: {knowledge_boundary}
 ## Rules
 - Stay fully in character. Use vocabulary and tone natural to your persona.
 - Do NOT use tool names, API endpoints, parameter names, or system internals.
-- Respond to the assistant's questions based on what your persona would know.
-- If the assistant asks for information outside your knowledge boundary, say you don't know.
-- When the assistant has fully completed your goal, output exactly: {done_marker}
-- If the assistant cannot do what you asked and there is no way forward, output: {done_marker}
-- Do NOT output {done_marker} until the goal is genuinely resolved or clearly impossible.
+- When the assistant directly asks for information within your knowledge boundary, answer immediately.
+- Do not volunteer information the assistant has not asked for, but never withhold directly requested information that you know.
+- If the assistant misunderstands your request or acts on wrong information, correct it clearly.
+- When the assistant lists action details and asks for your confirmation, review them against your goal. Confirm if correct; point out discrepancies if not.
+- If the assistant asks for information outside your knowledge boundary, say you don't know or give a vague answer.
 - Keep messages to 1-3 sentences. No markdown, no bullet points, no labels.
 
-## Critical: Reveal Information Gradually
-- In your FIRST message, only mention your primary reason for calling and give just \
-enough context for the assistant to start helping (e.g. your name, that you need help \
-with a booking). Do NOT list all your requests upfront.
-- Reveal additional requests and specific details (dates, names, amounts) only when the \
-assistant asks or after the current issue is resolved.
-- A real person does not open a call by listing every single thing they need in one \
-breath — they start with the most important thing and bring up the rest as the \
-conversation progresses.
+## Completing the Conversation
+- When the assistant has confirmed completing ALL parts of your goal with specific results (e.g. confirmation numbers, status changes), say a brief closing remark and output: {done_marker}
+- If the assistant clearly states it cannot help and there is no alternative path, output: {done_marker}
+- Do NOT output {done_marker} if the assistant merely acknowledged your request without completing it.
+- Do NOT continue the conversation after all goals are genuinely resolved.
+
+## Reveal Information Gradually
+- In your FIRST message, only describe your most immediate need and give just enough context for the assistant to start helping (e.g. your name, what you need help with). Do NOT list all your requests upfront.
+- Bring up secondary goals only after the current goal is resolved or naturally relevant.
 """
 
 

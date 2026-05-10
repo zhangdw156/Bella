@@ -117,7 +117,7 @@ class CaseRunner:
         backend, tools, tmp_dir = self._load_environment(env_name, world_setup)
         try:
             category_prompt = self._build_system_prompt(category)
-            self.react_agent.init_memory(extra_system_prompt=category_prompt)
+            self.react_agent.init_memory(interaction_mode=interaction_mode, extra_system_prompt=category_prompt)
 
             total_token_usage: TokenUsage | None = None
             ended_normally = False

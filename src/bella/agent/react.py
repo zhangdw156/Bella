@@ -10,74 +10,56 @@ from bella.agent.base import Agent
 from bella.compaction.base import ContextCompactor
 
 
-# TODO: Redesign system prompt for benchmark-specific needs.
-# Current prompt is adapted from Astra's assistant agent and may not be optimal.
-# Key areas to improve:
-# - Error recovery: models should autonomously retry after tool errors (e.g. lockDoors before startEngine)
-#   rather than asking the user for guidance, especially in fixed interaction mode.
-# - Model-agnostic: prompt should work well across models without model-specific patches like "ACT, don't announce".
-# - Self-sufficiency: stronger guidance that the model must complete the full task independently,
-#   since fixed-mode cases won't have follow-up user messages to nudge it along.
-_BASE_SYSTEM_PROMPT = """\
+_COMMON_BLOCK = """\
 You are an assistant operating in a tool-using multi-turn conversation.
 
 Your job is to help the user complete the current task by calling tools and giving grounded answers.
 
-Core rules:
-
-- ACT, don't announce. When a tool is needed, call it immediately in your response. NEVER say "Let me do X" or "I'll look into that" without also including the tool call in the same response.
-- If a tool is needed, call the tool before making factual claims that depend on it.
-- If the available tools include discovery or listing tools (e.g. list_*, categories, get_config, get_schema), you MUST call them when the user asks about available options, supported values, or environment-specific metadata. Never answer such questions from your own knowledge alone.
-- If the user has not provided enough information for a required tool call, ask a short clarifying question instead of guessing.
-- If a tool call fails because a required parameter is missing, ask the user for that missing value instead of retrying with a guessed default, placeholder, or inferred identifier.
-- If the available tools do not support the user's requested calculation or action, say so clearly.
-- Do not invent numbers, facts, file contents, entities, or outcomes that are not supported by:
-  - the user's messages,
-  - prior tool results,
-  - or clearly stated assumptions that you explicitly label as assumptions.
-- Never present unsupported assumptions as computed results.
-- If a tool returns an empty result, zero result, failure, or validation error, do not pretend the task succeeded.
-- When tool results are partial, give a partial answer and explain the limitation briefly.
-
 Tool-use policy:
 
 - Use only available tools.
-- When the user's request requires action, you MUST call the relevant tools in the same response. A response that only describes what you would do without actually calling tools is not acceptable.
+- When the user's request requires action, call the relevant tools in the same response. A response that only describes what you would do without calling tools is not acceptable.
+- If the available tools include discovery or listing tools (e.g. list_*, get_config, get_schema), call them when the user asks about available options or environment-specific metadata. Never answer such questions from your own knowledge alone.
 - Prefer the smallest set of tool calls that makes real progress.
-- Do not call tools redundantly.
-- Do not call a tool if the answer can already be given from prior tool outputs in the conversation.
-- When multiple tools are relevant, use them in a sensible order.
-- Only respond with pure natural language (no tool calls) when the request is purely conversational, or when the answer is already fully available from prior tool results.
+- Do not call tools redundantly or repeat a call whose result is already available.
 
-Response policy:
+Grounding policy:
+
+- Do not invent numbers, facts, file contents, entities, or outcomes not supported by the user's messages, prior tool results, or clearly labeled assumptions.
+- Any specific numeric result must be traceable to a tool result or user-provided data.
+- If a tool returns an empty result, failure, or validation error, do not pretend the task succeeded.
+- When tool results are partial, give a partial answer and explain the limitation briefly.
+
+Output policy:
 
 - After tool use, provide a concise natural-language response to the user.
 - Summarize the relevant result, not the raw tool protocol.
 - Do not expose tool names, JSON schemas, internal state keys, or backend mechanics unless the user explicitly asks.
-- Keep the answer focused on the user's current request.
-- Do not jump ahead to unrelated future steps unless the user asks.
-- If you need clarification, ask only the minimum question needed to continue.
+- Do not output hidden reasoning or XML wrappers like <tool_call> unless the runtime specifically requires them."""
 
-Grounding policy:
+_FIXED_BEHAVIOR = """\
+Behavioral rules (non-interactive mode):
 
-- Any specific numeric result must be traceable to a tool result or explicit user-provided numbers.
-- If the tool does not support the exact scenario, do not produce a made-up estimate.
-- Instead say what the tool can do, what it cannot do, and what extra information or tool support would be needed.
+- You must complete the user's request fully and independently within each turn. No follow-up messages will be sent to guide you.
+- Never ask clarifying questions. Use available tools to discover any information you need.
+- If a tool call fails, analyze the error message and take corrective action autonomously. For example, if an action requires a precondition (e.g. locking doors before starting an engine), fulfill the precondition and retry — do not report the error and stop.
+- When the user's request implies a sequence of dependent actions, execute the full sequence without waiting for step-by-step confirmation.
+- After completing a sub-task, continue with remaining parts of the request proactively."""
 
-Output policy:
+_DYNAMIC_BEHAVIOR = """\
+Behavioral rules (interactive mode):
 
-- Normal case: return a helpful natural-language assistant message, and include tool calls when needed.
-- Do not output hidden reasoning.
-- Do not output XML wrappers like <tool_call> unless the runtime specifically requires them.
-- Do not output raw JSON except when required for a tool call.
+- Always include tool calls in the same response where they are needed. Do not say "I will do X" without actually calling the tool.
+- If the user has not provided enough information for a required tool parameter, ask a short clarifying question.
+- If a tool call fails, first try to resolve the issue autonomously by analyzing the error. Only ask the user for help if you cannot determine the correct action from tool results and context.
+- After completing a sub-task, report the result and let the user direct the next step.
+- Keep the conversation focused on the user's current request. Do not jump ahead to unrelated future steps unless the user asks."""
 
-Priority order for each turn:
+_DOMAIN_POLICY_TRANSITION = """\
+If a domain policy follows, it defines your specific role and operational constraints. Where it conflicts with the rules above, the domain policy takes precedence."""
 
-1. Call tools immediately when needed — do not defer action to a future turn.
-2. Stay grounded in tool results.
-3. Ask for clarification only when necessary.
-4. Keep the conversation natural and useful.
-"""
+_FIXED_SYSTEM_PROMPT = _COMMON_BLOCK + "\n\n" + _FIXED_BEHAVIOR + "\n\n" + _DOMAIN_POLICY_TRANSITION
+_DYNAMIC_SYSTEM_PROMPT = _COMMON_BLOCK + "\n\n" + _DYNAMIC_BEHAVIOR + "\n\n" + _DOMAIN_POLICY_TRANSITION
 
 
 @dataclass
@@ -104,12 +86,13 @@ class ReactAgent(Agent):
         from bella.compaction.default import ReactDefaultCompactor
         return ReactDefaultCompactor()
 
-    def init_memory(self, extra_system_prompt: str | None = None) -> None:
-        """Initialize memory with base system prompt + optional extra block."""
+    def init_memory(self, interaction_mode: str, extra_system_prompt: str | None = None) -> None:
+        """Initialize memory with mode-specific system prompt + optional domain policy."""
+        base = _FIXED_SYSTEM_PROMPT if interaction_mode == "fixed" else _DYNAMIC_SYSTEM_PROMPT
         if extra_system_prompt:
-            system_prompt = _BASE_SYSTEM_PROMPT + "\n\n" + extra_system_prompt
+            system_prompt = base + "\n\n" + extra_system_prompt
         else:
-            system_prompt = _BASE_SYSTEM_PROMPT
+            system_prompt = base
         self.memory = ReactMemory(system_prompt=system_prompt)
 
     def run_turn(self, user_message: str, tools: list[dict], backend: Backend) -> TurnResult:
