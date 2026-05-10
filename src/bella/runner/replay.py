@@ -107,11 +107,10 @@ class ReplayRunner:
         try:
             # Execute world_setup SQL
             if world_setup:
-                conn = sqlite3.connect(str(replay_db))
-                for sql in world_setup:
-                    conn.execute(sql)
-                conn.commit()
-                conn.close()
+                with sqlite3.connect(str(replay_db)) as conn:
+                    for sql in world_setup:
+                        conn.execute(sql)
+                    conn.commit()
 
             # Load backend
             backend_path = env_dir / "runtime" / "backend.py"
@@ -144,25 +143,22 @@ class ReplayRunner:
 
             # Verify SQL
             verify_results: list[VerifyResult] = []
-            conn = sqlite3.connect(str(replay_db))
+            with sqlite3.connect(str(replay_db)) as conn:
+                for v in verify:
+                    sql = v["sql"]
+                    expected = v["expected"]
+                    order_matters = v.get("order_matters", False)
 
-            for v in verify:
-                sql = v["sql"]
-                expected = v["expected"]
-                order_matters = v.get("order_matters", False)
+                    cursor = conn.execute(sql)
+                    actual = [list(row) for row in cursor.fetchall()]
 
-                cursor = conn.execute(sql)
-                actual = [list(row) for row in cursor.fetchall()]
-
-                passed = _compare_results(expected, actual, order_matters)
-                verify_results.append(VerifyResult(
-                    sql=sql,
-                    expected=expected,
-                    actual=actual,
-                    passed=passed,
-                ))
-
-            conn.close()
+                    passed = _compare_results(expected, actual, order_matters)
+                    verify_results.append(VerifyResult(
+                        sql=sql,
+                        expected=expected,
+                        actual=actual,
+                        passed=passed,
+                    ))
 
             all_passed = all(vr.passed for vr in verify_results)
 

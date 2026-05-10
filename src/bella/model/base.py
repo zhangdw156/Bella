@@ -51,6 +51,7 @@ class Model(ABC):
         api_key: str | None = None,
         temperature: float = 1.0,
         max_context_tokens: int = 128000,
+        timeout: float = 120.0,
         adapter: ModelAdapter | None = None,
     ):
         self.model_id = model_id
@@ -58,6 +59,7 @@ class Model(ABC):
         self.api_key = api_key
         self.temperature = temperature
         self.max_context_tokens = max_context_tokens
+        self.timeout = timeout
         self._adapter = adapter
 
     @property
@@ -96,4 +98,5 @@ class Model(ABC):
             "adapter_class": type(self.adapter).__name__,
             "max_context_tokens": self.max_context_tokens,
             "temperature": self.temperature,
+            "timeout": self.timeout,
         }

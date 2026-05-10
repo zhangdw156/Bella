@@ -28,7 +28,7 @@ class AnthropicAdapter:
 class AnthropicModel(Model):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._client = Anthropic(base_url=self.base_url, api_key=self.api_key)
+        self._client = Anthropic(base_url=self.base_url, api_key=self.api_key, timeout=self.timeout)
 
     def default_adapter(self) -> ModelAdapter:
         return AnthropicAdapter()

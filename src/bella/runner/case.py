@@ -60,11 +60,10 @@ class CaseRunner:
         # Execute world_setup SQL
         if world_setup:
             import sqlite3
-            conn = sqlite3.connect(str(session_db))
-            for sql in world_setup:
-                conn.execute(sql)
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(str(session_db)) as conn:
+                for sql in world_setup:
+                    conn.execute(sql)
+                conn.commit()
 
         # Load backend
         backend_path = env_dir / "runtime" / "backend.py"
