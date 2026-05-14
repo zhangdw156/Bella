@@ -25,13 +25,12 @@ bella/
   "case_id": "string",
   "env_name": "string",
   "category": "string",
-  "source": "bfcl | mcpmark | tau3 | astra",
+  "source": "mcpmark | tau3 | astra",
   "tags": ["string"],
 
   "interaction_mode": "fixed | dynamic",
 
-  "demand": "string (dynamic only)",
-  "user_demands": ["string"] ,
+  "demand": "string",
   "world_setup": ["string"],
   "user_agent_config": {
     "role": "string",
@@ -57,8 +56,8 @@ bella/
 |-------|------|----------|-------------|
 | `case_id` | string | yes | Unique identifier across the entire benchmark. |
 | `env_name` | string | yes | Name of the environment directory this case runs in. |
-| `category` | string | yes | Underscore-separated hierarchical category (e.g., `"bfclv4_multi_base"`, `"tau3_airline"`). Used for prefix-based subset selection during evaluation. |
-| `source` | string | yes | Origin of this case: `"bfcl"`, `"mcpmark"`, `"tau3"`, or `"astra"`. |
+| `category` | string | yes | Underscore-separated hierarchical category (e.g., `"mcpmark_postgres"`, `"tau3_airline"`). Used for prefix-based subset selection during evaluation. |
+| `source` | string | yes | Origin of this case: `"mcpmark"`, `"tau3"`, or `"astra"`. |
 | `tags` | string[] | no | Categorization tags (e.g., `["booking", "multi-step"]`). |
 
 ### Interaction Mode
@@ -71,8 +70,7 @@ bella/
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `demand` | string | dynamic only | The user's goal. Drives the user agent's behavior. Not present in fixed mode. |
-| `user_demands` | string[] | fixed only | Pre-scripted user messages sent to the assistant agent sequentially. Not present in dynamic mode. |
+| `demand` | string | yes | The user's goal. In fixed mode, sent as a single message for autonomous completion. In dynamic mode, drives the user agent's behavior. |
 | `world_setup` | string[] | no | SQL statements executed on the world.db copy before the case runs. Default `[]`. |
 | `user_agent_config` | object | dynamic only | Configuration for the LLM-based user agent. Not present in fixed mode. |
 
@@ -104,11 +102,9 @@ Each entry in `verify`:
 
 ### Fixed Mode (Track A)
 
-Used for cases from BFCL and MCPMark. User messages are pre-scripted — no LLM user agent is involved.
+Used for cases from MCPMark. No LLM user agent is involved.
 
-The React agent receives `user_demands[0]`, processes it (making tool calls as needed), responds, then receives `user_demands[1]`, and so on until all messages are exhausted.
-
-For single-shot autonomous tasks (MCPMark style), `user_demands` has exactly one entry.
+The React agent receives `demand` as a single user message and completes the entire task autonomously in one turn, making as many tool calls as needed.
 
 ### Dynamic Mode (Track B)
 
@@ -124,7 +120,7 @@ The user agent sends the first message (derived from `demand` and persona), the 
 3. Load backend.py with session.db
 4. Load tools from tools.jsonl
 5. Run agent:
-   - Fixed mode: send user_demands[0], agent processes, send user_demands[1], ...
+   - Fixed mode: send demand as single message, agent completes autonomously
    - Dynamic mode: user agent generates first message, alternates with react agent
 6. Collect the complete tool call chain from the agent's execution
 7. Replay:
@@ -157,38 +153,6 @@ Learned from Astra's token substitution issue:
 
 ## Examples
 
-### BFCL Case (Fixed, Multi-Turn)
-
-```json
-{
-  "case_id": "bfcl_base_001",
-  "env_name": "gorilla_fs_twitter",
-  "category": "bfclv4_multi_base",
-  "source": "bfcl",
-  "tags": ["file-ops", "social-media"],
-  "interaction_mode": "fixed",
-  "user_demands": [
-    "Move 'final_report.pdf' within document directory to 'temp' directory in document. Make sure to create the directory.",
-    "Search for 'budget analysis' sections in the file.",
-    "Sort the 'final_report.pdf' by line for improved clarity.",
-    "Move 'previous_report.pdf' to temp as well and compare it with 'final_report.pdf'."
-  ],
-  "world_setup": [],
-  "verify": [
-    {
-      "sql": "SELECT path FROM files WHERE name = 'final_report.pdf'",
-      "expected": [["/workspace/document/temp/final_report.pdf"]],
-      "order_matters": false
-    },
-    {
-      "sql": "SELECT path FROM files WHERE name = 'previous_report.pdf'",
-      "expected": [["/workspace/document/temp/previous_report.pdf"]],
-      "order_matters": false
-    }
-  ]
-}
-```
-
 ### MCPMark Case (Fixed, Single-Turn)
 
 ```json
@@ -199,9 +163,7 @@ Learned from Astra's token substitution issue:
   "source": "mcpmark",
   "tags": ["file-merging"],
   "interaction_mode": "fixed",
-  "user_demands": [
-    "Find the 10 smallest .txt files in the test directory, merge their content in alphabetical order, and create merged_content.txt with filename headers before each file's content."
-  ],
+  "demand": "Find the 10 smallest .txt files in the test directory, merge their content in alphabetical order, and create merged_content.txt with filename headers before each file's content.",
   "world_setup": [],
   "verify": [
     {

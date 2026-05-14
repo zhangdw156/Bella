@@ -123,17 +123,10 @@ class CaseRunner:
             ended_normally = False
 
             if interaction_mode == "fixed":
-                user_demands = case.user_demands or []
-                for user_msg in user_demands:
-                    result = self.react_agent.run_turn(user_msg, tools, backend)
-                    if result.token_usage:
-                        if total_token_usage is None:
-                            total_token_usage = result.token_usage
-                        else:
-                            total_token_usage = TokenUsage(
-                                input_tokens=total_token_usage.input_tokens + result.token_usage.input_tokens,
-                                output_tokens=total_token_usage.output_tokens + result.token_usage.output_tokens,
-                            )
+                assert case.demand, f"Case {case_id}: fixed mode requires a 'demand' field"
+                result = self.react_agent.run_turn(case.demand, tools, backend)
+                if result.token_usage:
+                    total_token_usage = result.token_usage
                 ended_normally = True
 
             elif interaction_mode == "dynamic":

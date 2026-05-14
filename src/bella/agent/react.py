@@ -75,7 +75,7 @@ class ReactAgent(Agent):
     def __init__(
         self,
         model: Model,
-        max_llm_calls_per_turn: int = 12,
+        max_llm_calls_per_turn: int = 48,
         **kwargs,
     ):
         super().__init__(model=model, **kwargs)

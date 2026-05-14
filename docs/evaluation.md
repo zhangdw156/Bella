@@ -55,12 +55,12 @@ bella run model.name=GPT-4.1 model.protocol=openai_chat_completions model.model_
 bella run model.adapter=adapters/my_model.py
 
 # Subset selection (see below)
-bella run subset=bfclv4_multi
-bella run subset=bfclv4_multi_base
-bella run subset="bfclv4_multi_base,tau3_airline"
+bella run subset=mcpmark
+bella run subset=mcpmark_postgres
+bella run subset="mcpmark_postgres,tau3_airline"
 
 # Count per category
-bella run subset=bfclv4_multi count=5
+bella run subset=mcpmark count=5
 
 # pass@k evaluation
 bella run n=4
@@ -69,7 +69,7 @@ bella run n=4
 bella run workers=8
 
 # Combined
-bella run subset="bfclv4_multi,tau3" count=10 n=4 workers=8
+bella run subset="mcpmark,tau3" count=10 n=4 workers=8
 ```
 
 ## Case Selection
@@ -80,10 +80,6 @@ Cases are categorized using underscore-separated hierarchical names. The `subset
 
 | Category | Cases | Description |
 |----------|-------|-------------|
-| `bfclv4_multi_base` | 25 | Multi-turn with complete information |
-| `bfclv4_multi_miss_func` | 25 | Functions held out to test error recognition |
-| `bfclv4_multi_miss_param` | 25 | Parameters must be inferred from context |
-| `bfclv4_multi_long_context` | 25 | Large datasets to test information filtering |
 | `mcpmark_filesystem` | ~20 | File system operations |
 | `mcpmark_postgres` | ~20 | Database operations |
 | `tau3_airline` | ~25 | Airline booking, cancellation, modification |
@@ -94,22 +90,20 @@ Cases are categorized using underscore-separated hierarchical names. The `subset
 
 | `subset=` | Matches | Total |
 |-----------|---------|-------|
-| `all` | Everything | ~200 |
-| `bfclv4_multi` | All 4 BFCL multi-turn subsets | 100 |
-| `bfclv4_multi_base` | Only base subset | 25 |
+| `all` | Everything | ~100 |
 | `mcpmark` | filesystem + postgres | ~40 |
 | `tau3` | airline + retail | ~50 |
-| `"bfclv4_multi_base,tau3_airline"` | Two specific subsets | ~50 |
+| `"mcpmark_postgres,tau3_airline"` | Two specific subsets | ~45 |
 
 ### Selection Rules
 
 - `subset=all` — run all cases (default).
-- `subset=bfclv4_multi` — prefix match: all categories starting with `bfclv4_multi`.
-- `subset=bfclv4_multi_base` — exact match: only this category.
-- `subset="bfclv4_multi_base,tau3_airline"` — comma-separated: multiple prefixes.
+- `subset=mcpmark` — prefix match: all categories starting with `mcpmark`.
+- `subset=mcpmark_postgres` — exact match: only this category.
+- `subset="mcpmark_postgres,tau3_airline"` — comma-separated: multiple prefixes.
 - `count=5` — limit to 5 cases **per matched leaf category**. Cases are sampled deterministically (sorted by `case_id`, take first N).
 
-When `subset=bfclv4_multi` and `count=5`: runs 5 cases from each of the 4 BFCL subsets (20 total).
+When `subset=mcpmark` and `count=5`: runs 5 cases from each of the 2 MCPMark subsets (10 total).
 
 ## Model Adapter
 
@@ -166,7 +160,7 @@ Format:
 {
   "tau3_airline": "The current time is 2024-05-15 ...\n\nAs an airline agent ...",
   "tau3_retail": "...",
-  "bfclv4_multi_base": null
+  "mcpmark_postgres": null
 }
 ```
 
@@ -199,10 +193,8 @@ Where `n` = total runs, `c` = number of passing runs, `k` = attempts.
 ```
 results/{model_name}/
 ├── run_1/
-│   ├── bfclv4_multi_base/
-│   │   ├── bfclv4_multi_base_001.json
-│   │   └── ...
-│   ├── bfclv4_multi_miss_func/
+│   ├── mcpmark_postgres/
+│   │   ├── mcpmark_postgres_000.json
 │   │   └── ...
 │   ├── tau3_airline/
 │   │   └── ...
@@ -212,13 +204,13 @@ results/{model_name}/
 └── summary.json
 ```
 
-### Per-case output (`bfcl_base_001.json`)
+### Per-case output (`mcpmark_postgres_000.json`)
 
 ```json
 {
-  "case_id": "bfcl_base_001",
-  "category": "bfclv4_multi_base",
-  "env_name": "gorilla_fs_twitter",
+  "case_id": "mcpmark_postgres_000",
+  "category": "mcpmark_postgres",
+  "env_name": "mcpmark_postgres_employees",
   "model": "Qwen3-8B",
   "interaction_mode": "fixed",
   "messages": [...],
@@ -246,7 +238,7 @@ results/{model_name}/
 {
   "model": "Qwen3-8B",
   "n": 4,
-  "total_cases": 200,
+  "total_cases": 100,
   "metrics": {
     "overall": {
       "pass@1": 0.72,
@@ -254,8 +246,7 @@ results/{model_name}/
       "pass^4": 0.51
     },
     "by_category": {
-      "bfclv4_multi_base": {"pass@1": 0.80, "pass@4": 0.95, "pass^4": 0.60},
-      "bfclv4_multi_miss_func": {"pass@1": 0.65, "pass@4": 0.82, "pass^4": 0.42},
+      "mcpmark_postgres": {"pass@1": 0.75, "pass@4": 0.90, "pass^4": 0.55},
       "tau3_airline": {"pass@1": 0.70, "pass@4": 0.88, "pass^4": 0.48},
       "mcpmark_filesystem": {"pass@1": 0.75, "pass@4": 0.90, "pass^4": 0.55}
     },
@@ -283,7 +274,7 @@ bella run
   │   ├── 3. Load backend.py with session.db
   │   ├── 4. Load tools from tools.jsonl
   │   ├── 5. Run agent:
-  │   │      Fixed:   send user_demands sequentially
+  │   │      Fixed:   send demand, agent completes autonomously
   │   │      Dynamic: user agent ↔ react agent loop
   │   ├── 6. Collect tool call chain
   │   ├── 7. Replay tool call chain on fresh DB (token substitution)

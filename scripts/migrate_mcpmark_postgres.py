@@ -31,7 +31,7 @@ def base(case_id, env_db, tags, description):
         "source": "mcpmark",
         "tags": tags,
         "interaction_mode": "fixed",
-        "user_demands": [description],
+        "demand": description,
         "world_setup": [],
     }
 

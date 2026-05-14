@@ -77,8 +77,7 @@ class Case:
     source: str
     tags: list[str]
     interaction_mode: Literal["fixed", "dynamic"]
-    demand: str | None = None
-    user_demands: list[str] | None = None
+    demand: str
     world_setup: list[str] = field(default_factory=list)
     user_agent_config: UserAgentConfig | None = None
     verify: list[VerifySpec] = field(default_factory=list)
@@ -109,8 +108,7 @@ class Case:
             source=data["source"],
             tags=data.get("tags", []),
             interaction_mode=data["interaction_mode"],
-            demand=data.get("demand"),
-            user_demands=data.get("user_demands"),
+            demand=data["demand"],
             world_setup=data.get("world_setup", []),
             user_agent_config=uac,
             verify=verify,

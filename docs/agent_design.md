@@ -525,8 +525,7 @@ class UserTurnResult:
 def run_fixed(case, react_agent, tools, backend) -> RunResult:
     react_agent.init_memory(system_prompt)
 
-    for user_msg in case["user_demands"]:
-        result = react_agent.run_turn(user_msg, tools, backend)
+    result = react_agent.run_turn(case["demand"], tools, backend)
 
     return RunResult(...)
 ```
@@ -572,7 +571,7 @@ class RunResult:
     total_tool_calls: list[ToolCall]     # Flattened from all turns
     token_usage: TokenUsage              # Aggregated
     timing: Timing
-    ended_normally: bool                 # UserAgent signaled [DONE] or all user_demands exhausted
+    ended_normally: bool                 # UserAgent signaled [DONE] or fixed mode completed
 ```
 
 ---
